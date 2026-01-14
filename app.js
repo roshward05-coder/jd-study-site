@@ -550,16 +550,61 @@ async function unitItemsSmart() {
   };
 
   function show(viewName) {
-    Object.entries(views).forEach(([k, el]) => {
-      if (!el) return;
-      el.style.display = (k === viewName) ? 'block' : 'none';
-    });
-    $$('.nav-btn').forEach((b) => b.classList.toggle('active', b.dataset.view === viewName));
-  }
-
-  $$('.nav-btn').forEach((btn) => {
-    btn.addEventListener('click', () => show(btn.dataset.view));
+  Object.entries(views).forEach(([k, el]) => {
+    if (!el) return; // ignore missing views
+    el.style.display = (k === viewName) ? 'block' : 'none';
   });
+
+  $$('.nav-btn').forEach((b) => {
+    b.classList.toggle('active', b.dataset.view === viewName);
+  });
+}
+
+
+  // ----------------------------
+// Router / navigation (SAFE)
+// ----------------------------
+const PRIVATE_VIEWS = new Set([
+  'library',
+  'learn',
+  'flashcards',
+  'tests',
+  'citations',
+  'timetable',
+  'tasks',
+  'exampack',
+  'settings'
+]);
+
+async function go(viewName) {
+  // Always show instantly (prevents “stuck” UI)
+  show(viewName);
+
+  // If this view is private, require login
+  if (PRIVATE_VIEWS.has(viewName)) {
+    const user = await requireAuth();
+    if (!user) {
+      // Redirect back to Units if not logged in
+      show('units');
+      alert('Please log in first to access your private study hub.');
+      return;
+    }
+
+    // If logged in, refresh cloud-driven parts when needed
+    if (viewName === 'library' || viewName === 'tests' || viewName === 'learn') {
+      try { await cloudLoadAll(); } catch (e) { console.error(e); }
+    }
+  }
+}
+
+$$('.nav-btn').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    const view = btn.dataset.view;
+    // run async without blocking click event
+    go(view);
+  });
+});
+
 
   // ----------------------------
   // Theme toggle
@@ -2252,15 +2297,10 @@ $('#filter-tag')?.addEventListener('change', rerenderLibrarySmart);
 window.addEventListener("load", async () => {
   const user = await requireAuth();
   if (!user) {
-    // Optional: hide app layout until login
-    // document.querySelector(".layout").style.display = "none";
+    show('units');
     return;
   }
-  if (typeof cloudLoadAll === "function") await cloudLoadAll();
-  window.addEventListener("load", async () => {
-  const user = await requireAuth();
-  if (!user) return;
   await cloudLoadAll();
 });
 
-})(); // <-- FINAL line (only once)
+})(); // <- FINAL LINE
