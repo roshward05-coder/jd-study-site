@@ -57,10 +57,102 @@
   });
 
   // Optional: cloud reload hook (no-op unless you implement full cloud Library sync)
-  function cloudLoadAll() {
-    // Intentionally minimal: you can later load Supabase rows into your Library UI
-    // if you choose to make Library fully cloud-backed too.
+ async function cloudLoadAll() {
+  // PRIVATE MODE: force login
+  const user = await requireAuth();
+  if (!user) return;
+
+  // 1) Refresh Library list from Supabase for active unit (by unit name string)
+  const unit = activeUnitName();
+  let rows = [];
+  try {
+    rows = await cloudFetchLibraryItems(unit);
+  } catch (err) {
+    console.error(err);
+    alert("Failed to load cloud library: " + (err?.message || err));
+    return;
   }
+
+  // 2) Build tag set from cloud rows and refresh dropdowns
+  const tags = new Set();
+  rows.forEach(r => (r.tags || []).forEach(t => tags.add(t)));
+  const list = Array.from(tags).sort((a,b) => a.localeCompare(b));
+
+  const tagSel = $('#filter-tag');
+  const testTagSel = $('#test-tag');
+  const practiceSel = $('#practice-skill');
+
+  if (tagSel) tagSel.innerHTML = '<option value="">All topics</option>' + list.map(t => `<option value="${escapeHtml(t)}">${escapeHtml(t)}</option>`).join('');
+  if (testTagSel) testTagSel.innerHTML = '<option value="">Choose topic</option>' + list.map(t => `<option value="${escapeHtml(t)}">${escapeHtml(t)}</option>`).join('');
+  if (practiceSel) practiceSel.innerHTML = '<option value="">Choose a skill/topic</option>' + list.map(t => `<option value="${escapeHtml(t)}">${escapeHtml(t)}</option>`).join('');
+
+  // 3) Render Library list using cloud rows (NOT localStorage items)
+  const listEl = $('#library-list');
+  if (listEl) {
+    const typeFilter = $('#filter-type')?.value || '';
+    const tagFilter = $('#filter-tag')?.value || '';
+
+    const filtered = rows.filter((it) => {
+      const okType = typeFilter ? it.type === typeFilter : true;
+      const okTag = tagFilter ? (it.tags || []).includes(tagFilter) : true;
+      return okType && okTag;
+    });
+
+    listEl.innerHTML = '';
+    if (!filtered.length) {
+      listEl.innerHTML = '<div class="muted small">No cloud items yet. Upload a PDF/TXT.</div>';
+    } else {
+      filtered.forEach((it) => {
+        const div = document.createElement('div');
+        div.className = 'item';
+        div.dataset.id = it.id;
+
+        const tagsHtml = (it.tags || []).slice(0, 3).map((t) => `<span class="badge">${escapeHtml(t)}</span>`).join(' ');
+        div.innerHTML = `
+          <div class="row between">
+            <strong>${escapeHtml(it.title || 'Untitled')}</strong>
+            <div class="row gap">
+              <span class="badge">${escapeHtml(it.type || 'note')}</span>
+              ${it.storage_path ? '<span class="pill">PDF</span>' : ''}
+            </div>
+          </div>
+          <div class="muted small" style="margin-top:6px">${tagsHtml || '<span class="muted small">No tags</span>'}</div>
+        `;
+
+        // Click: open item in the existing viewer panel
+        div.addEventListener('click', async () => {
+          // Fill your viewer using cloud data:
+          $('#open-item-title').textContent = it.title || 'Untitled';
+          $('#open-item-meta').textContent = `${(it.type || '').toUpperCase()} • ${(it.tags || []).join(', ') || 'No tags'}`;
+          $('#doc-body').textContent = it.content_text || '';
+
+          // If it’s a PDF, you can optionally render it:
+          // await openCloudPdfInViewer(it);
+        });
+
+        listEl.appendChild(div);
+      });
+
+      // Auto open first item
+      const first = filtered[0];
+      if (first) {
+        $('#open-item-title').textContent = first.title || 'Untitled';
+        $('#open-item-meta').textContent = `${(first.type || '').toUpperCase()} • ${(first.tags || []).join(', ') || 'No tags'}`;
+        $('#doc-body').textContent = first.content_text || '';
+      }
+    }
+  }
+
+  // 4) Stats: items count now should come from cloud rows (per unit)
+  const statItems = $('#stat-items');
+  if (statItems) statItems.textContent = rows.length;
+
+  // due cards + streak are still local in your MVP
+  renderStats();
+
+  // 5) Skills display is still based on local mastery map
+  renderSkills();
+}
 
   // Update UI when auth changes
   supabase?.auth?.onAuthStateChange?.(() => {
@@ -129,6 +221,47 @@
     // If you have a toast UI, plug it in. Otherwise fall back:
     console.log(msg);
   }
+  async function openCloudPdfInViewer(item) {
+  // item is a row from Supabase library_items
+  if (!item?.storage_path) {
+    alert("This item has no PDF stored.");
+    return;
+  }
+
+  const user = await requireAuth();
+  if (!user) return;
+
+  const url = await cloudSignedUrl(item.storage_path);
+
+  // If you already have a pdf.js viewer function, call it here.
+  // Minimal pattern: open in new tab OR feed into pdfjsLib.getDocument({ url })
+  // Example: window.open(url, "_blank");
+
+  // If your app uses pdf.js text extraction only (no visual rendering), do this:
+  if (!window.pdfjsLib) {
+    window.open(url, "_blank");
+    return;
+  }
+
+  // Example render (very minimal): load first page into a <canvas id="pdf-canvas">
+  const canvas = document.getElementById("pdf-canvas");
+  if (!canvas) {
+    // fallback: new tab
+    window.open(url, "_blank");
+    return;
+  }
+
+  const loadingTask = pdfjsLib.getDocument({ url });
+  const pdf = await loadingTask.promise;
+  const page = await pdf.getPage(1);
+  const viewport = page.getViewport({ scale: 1.2 });
+  const ctx = canvas.getContext("2d");
+  canvas.width = viewport.width;
+  canvas.height = viewport.height;
+
+  await page.render({ canvasContext: ctx, viewport }).promise;
+}
+
 
   // ----------------------------
   // Supabase storage + DB helpers
@@ -488,20 +621,72 @@
   });
 
   $('#file-input')?.addEventListener('change', async (e) => {
-    const files = Array.from(e.target.files || []);
-    const type = $('#item-type')?.value || 'note';
-    const tags = normaliseTags($('#item-tags')?.value || '');
-    for (const f of files) {
-      const isPDF = f.type === 'application/pdf' || f.name.toLowerCase().endsWith('.pdf');
-      const content = isPDF ? await extractTextFromPDF(f) : await f.text();
-      addItem({ title: f.name, type, tags, content });
-    }
+  const files = Array.from(e.target.files || []);
+  if (!files.length) return;
+
+  // PRIVATE MODE: force login
+  const user = await requireAuth();
+  if (!user) {
     e.target.value = '';
-    renderLibrary();
-    renderTags();
-    renderStats();
-    renderUnitCards();
-  });
+    return;
+  }
+
+  const type = $('#item-type')?.value || 'note';
+  const tags = normaliseTags($('#item-tags')?.value || '');
+  const unit = activeUnitName(); // Supabase stores unit as string
+
+  for (const file of files) {
+    const isPDF = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
+    const isTXT = file.type === 'text/plain' || file.name.toLowerCase().endsWith('.txt');
+
+    try {
+      if (isPDF) {
+        // 1) Extract text locally (pdf.js)
+        const extractedText = await extractTextFromPDF(file);
+
+        // 2) Upload PDF to Supabase Storage
+        const storage_path = await cloudUploadPdf(file);
+
+        // 3) Insert metadata + extracted text into Supabase table
+        await cloudInsertLibraryItem({
+          unit,
+          title: file.name,
+          type,
+          tags,
+          storage_path,
+          content_text: extractedText
+        });
+
+        toast(`Uploaded PDF: ${file.name}`);
+      } else if (isTXT) {
+        // 1) Read text
+        const content_text = await file.text();
+
+        // 2) Insert into Supabase table (no storage file)
+        await cloudInsertLibraryItem({
+          unit,
+          title: file.name,
+          type,
+          tags,
+          storage_path: null,
+          content_text
+        });
+
+        toast(`Uploaded TXT: ${file.name}`);
+      } else {
+        alert(`Unsupported file: ${file.name}\nOnly PDF and TXT are supported.`);
+      }
+    } catch (err) {
+      console.error(err);
+      alert(`Upload failed for ${file.name}: ${err?.message || err}`);
+    }
+  }
+
+  e.target.value = '';
+  // Refresh cloud-driven UI
+  if (typeof cloudLoadAll === "function") await cloudLoadAll();
+});
+
 
   // ----------------------------
   // Library: list / open / edit
@@ -1994,5 +2179,12 @@
   renderUnitSelect();
   refreshAll();
   show('units');
-
-})();
+window.addEventListener("load", async () => {
+  const user = await requireAuth();
+  if (!user) {
+    // Optional: hide app layout until login
+    // document.querySelector(".layout").style.display = "none";
+    return;
+  }
+  if (typeof cloudLoadAll === "function") await cloudLoadAll();
+});();
