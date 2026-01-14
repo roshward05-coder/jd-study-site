@@ -15,7 +15,7 @@
 
   // ========= Supabase (PRIVATE MODE) =========
   const SUPABASE_URL = "https://ujwayetqmcvbqlckvjks.supabase.co";
-  const SUPABASE_ANON_KEY = "sb_publishable_X1MhmNxKnmt7OL2n0oIXoA_Fw47d9IA";
+  const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVqd2F5ZXRxbWN2YnFsY2t2amtzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjgzNzM4NDksImV4cCI6MjA4Mzk0OTg0OX0.1v1MB3AgnmnmEY37C2p9KrwhCsMiG0yLV30-1jz4rP8";
   const supabase = window.supabase?.createClient?.(SUPABASE_URL, SUPABASE_ANON_KEY);
 
   // Auth UI elements
@@ -138,6 +138,11 @@
 
         listEl.appendChild(div);
       });
+
+      if (window.pdfjsLib) {
+  pdfjsLib.GlobalWorkerOptions.workerSrc =
+    "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.14.305/pdf.worker.min.js";
+}
 
       // Auto open first item
       const first = filtered[0];
