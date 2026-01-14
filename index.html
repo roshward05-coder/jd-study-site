@@ -1,0 +1,638 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>JD Study Hub — Units • Library • Flashcards • Tests</title>
+  <link rel="stylesheet" href="style.css">
+  <script defer src="app.js"></script>
+  <script defer src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.14.305/pdf.min.js"></script>
+</head>
+<body class="theme-light">
+  <div id="app">
+    <header class="topbar">
+      <div class="brand">
+        <div class="logo">JDH</div>
+        <div>
+          <h1>JD Study Hub</h1>
+          <div class="sub">Units • Library • Revise • Flashcards • Tests</div>
+        </div>
+      </div>
+
+      <div class="top-actions">
+        <div class="search">
+          <input id="global-search" placeholder="Search across your library… (notes, cases, lectures)">
+          <div id="search-results" class="search-results" style="display:none"></div>
+        </div>
+        <button id="theme-toggle" class="ghost">Theme</button>
+      </div>
+    </header>
+
+    <div class="layout">
+      <aside class="sidebar">
+        <nav class="nav">
+          <button data-view="units" class="nav-btn active">Units</button>
+          <button data-view="library" class="nav-btn">Library</button>
+          <button data-view="learn" class="nav-btn">Learn</button>
+          <button data-view="flashcards" class="nav-btn">Flashcards</button>
+          <button data-view="tests" class="nav-btn">Tests</button>
+          <button data-view="citations" class="nav-btn">AGLC4 Citations</button>
+          <button data-view="timetable" class="nav-btn">Timetable</button>
+          <button data-view="tasks" class="nav-btn">To‑Do</button>
+          <button data-view="exampack" class="nav-btn">Exam Pack</button>
+          <button data-view="settings" class="nav-btn">Settings</button>
+        </nav>
+
+        <div class="unit-switcher">
+          <label class="label">Current unit</label>
+          <select id="active-unit"></select>
+          <div class="row gap">
+            <input id="new-unit-input" placeholder="Add unit (e.g., Contracts)">
+            <button id="add-unit">Add</button>
+          </div>
+          <div class="muted small">Tip: most tools (tasks, packs, progress) follow your selected unit.</div>
+        </div>
+
+        <div class="stats">
+          <div class="stat">
+            <div class="k" id="stat-items">0</div>
+            <div class="v">Library items</div>
+          </div>
+          <div class="stat">
+            <div class="k" id="stat-due">0</div>
+            <div class="v">Cards due</div>
+          </div>
+          <div class="stat">
+            <div class="k" id="stat-streak">0</div>
+            <div class="v">Day streak</div>
+          </div>
+        </div>
+      </aside>
+
+      <main class="main">
+        <!-- UNITS -->
+        <section id="view-units" class="view">
+          <div class="view-head">
+            <h2>Units</h2>
+            <div class="muted">A clean dashboard for your JD year: upload materials, track progress, practise weekly.</div>
+          </div>
+
+          <div class="grid two">
+            <div class="card">
+              <h3>Unit overview</h3>
+              <div id="unit-cards" class="unit-cards"></div>
+            </div>
+
+            <div class="card">
+              <h3>Quick actions</h3>
+              <div class="actions">
+                <button id="qa-upload">Upload to Library</button>
+                <button id="qa-generate-deck" class="secondary">Make Flashcards from Open Item</button>
+                <button id="qa-generate-test" class="secondary">Generate Test from Selected</button>
+              </div>
+              <div class="divider"></div>
+              <h4>Study ritual (Khan‑style)</h4>
+              <ol class="small">
+                <li>Pick a unit → skim your lecture summary.</li>
+                <li>Do 10 flashcards (spaced repetition).</li>
+                <li>Take a short test (mixed question types).</li>
+                <li>Review missed concepts; tag items by topic.</li>
+              </ol>
+            </div>
+          </div>
+        </section>
+
+        <!-- LIBRARY -->
+        <section id="view-library" class="view" style="display:none">
+          <div class="view-head">
+            <h2>Library</h2>
+            <div class="muted">Upload and organise lecture notes, cases, tutorials and readings—then revise with highlights & summaries.</div>
+          </div>
+
+          <div class="grid two">
+            <div class="card">
+              <div class="row between">
+                <h3>Your items</h3>
+                <div class="row gap">
+                  <select id="filter-type">
+                    <option value="">All types</option>
+                    <option value="lecture">Lectures</option>
+                    <option value="case">Cases</option>
+                    <option value="tutorial">Tutorials</option>
+                    <option value="note">Notes</option>
+                    <option value="reading">Readings</option>
+                  </select>
+                  <select id="filter-tag"><option value="">All topics</option></select>
+                </div>
+              </div>
+
+              <div class="row gap wrap" style="margin-top:10px">
+                <input id="item-title" placeholder="Title (e.g., Week 3 — Consideration)">
+                <select id="item-type">
+                  <option value="lecture">Lecture</option>
+                  <option value="case">Case</option>
+                  <option value="tutorial">Tutorial</option>
+                  <option value="note">Note</option>
+                  <option value="reading">Reading</option>
+                </select>
+                <input id="item-tags" placeholder="Topics/tags (comma‑separated)">
+                <button id="add-text-item" class="secondary">Add text</button>
+              </div>
+
+              <div class="upload">
+                <label class="label">Upload files (TXT or PDF)</label>
+                <input id="file-input" type="file" accept=".txt,.pdf" multiple>
+                <div class="muted small">PDFs are converted to text in your browser using pdf.js.</div>
+              </div>
+
+              <div id="library-list" class="list"></div>
+            </div>
+
+            <div class="card">
+              <div class="row between">
+                <div>
+                  <h3 id="open-item-title">Open an item</h3>
+                  <div id="open-item-meta" class="muted small"></div>
+                </div>
+                <div class="row gap">
+                  <button id="toggle-edit" class="ghost">Edit</button>
+                  <button id="highlight-btn" class="ghost">Highlight</button>
+                  <button id="summarize-btn">Summarise</button>
+                </div>
+              </div>
+
+              <div id="doc-body" class="doc-body" contenteditable="false"></div>
+
+              <div class="divider"></div>
+
+              <div class="grid two">
+                <div>
+                  <h4>Summary</h4>
+                  <div id="summary" class="panel muted">—</div>
+                </div>
+                <div>
+                  <h4>Key concepts</h4>
+                  <div class="row gap wrap">
+                    <button id="extract-concepts" class="secondary">Extract</button>
+                    <button id="add-concepts-as-cards" class="secondary">→ Flashcards</button>
+                  </div>
+                  <div id="concepts" class="chips"></div>
+                </div>
+              </div>
+
+              <div class="divider"></div>
+
+              <div class="row gap wrap">
+                <button id="create-deck-from-open">Create flashcard deck from open item</button>
+                <button id="pin-to-exampack" class="secondary">Pin to exam pack</button>
+                <button id="delete-open" class="danger ghost">Delete</button>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- LEARN -->
+        <section id="view-learn" class="view" style="display:none">
+          <div class="view-head">
+            <h2>Learn</h2>
+            <div class="muted">A Khan‑style “skills” view: topics (tags) become skills, and your quizzes raise mastery.</div>
+          </div>
+
+          <div class="grid two">
+            <div class="card">
+              <h3>Skills for this unit</h3>
+              <div id="skills" class="skills"></div>
+            </div>
+
+            <div class="card">
+              <h3>Practice</h3>
+              <div class="row gap wrap">
+                <select id="practice-skill"><option value="">Choose a skill/topic</option></select>
+                <button id="start-skill-quiz">Start practice quiz</button>
+              </div>
+              <div class="muted small" style="margin-top:8px">Practice quizzes are generated from your tagged library items.</div>
+              <div class="divider"></div>
+              <div id="learn-session" class="panel">—</div>
+            </div>
+          </div>
+        </section>
+
+        <!-- FLASHCARDS -->
+        <section id="view-flashcards" class="view" style="display:none">
+          <div class="view-head">
+            <h2>Flashcards</h2>
+            <div class="muted">Quizlet‑style decks + spaced repetition (Leitner boxes). Review what’s due today.</div>
+          </div>
+
+          <div class="grid two">
+            <div class="card">
+              <div class="row between">
+                <h3>Decks</h3>
+                <div class="row gap">
+                  <button id="new-empty-deck" class="secondary">New deck</button>
+                  <button id="delete-deck" class="danger ghost">Delete</button>
+                </div>
+              </div>
+
+              <div class="row gap wrap">
+                <label class="label">Deck</label>
+                <select id="deck-select"></select>
+                <button id="study-due" class="secondary">Study due</button>
+              </div>
+
+              <div class="divider"></div>
+
+              <h4 class="small">Add a card</h4>
+              <div class="row gap wrap">
+                <input id="card-q" placeholder="Front (question / prompt)">
+                <input id="card-a" placeholder="Back (answer)">
+                <button id="add-card">Add</button>
+              </div>
+
+              <div class="divider"></div>
+
+              <div id="deck-stats" class="muted small">—</div>
+            </div>
+
+            <div class="card">
+              <div id="flashcard" class="flashcard">
+                <div id="card-info" class="muted small"></div>
+                <div id="question" class="card-face"></div>
+                <button id="show-answer" class="secondary">Show answer</button>
+                <div id="answer" class="card-face" style="display:none"></div>
+
+                <div class="row gap wrap" style="margin-top:10px">
+                  <button id="prev-card" class="ghost">Prev</button>
+                  <button id="next-card" class="ghost">Next</button>
+                  <div class="spacer"></div>
+                  <button id="mark-again" class="danger ghost">Again</button>
+                  <button id="mark-known">Known</button>
+                </div>
+              </div>
+
+              <div class="divider"></div>
+
+              <h4>Due today</h4>
+              <div id="due-list" class="list compact"></div>
+            </div>
+          </div>
+        </section>
+
+        <!-- TESTS -->
+        <section id="view-tests" class="view" style="display:none">
+          <div class="view-head">
+            <h2>Tests</h2>
+            <div class="muted">Generate mixed‑format quizzes from your materials (MCQ + short answer + cloze).</div>
+          </div>
+
+          <div class="grid two">
+            <div class="card">
+              <h3>Build a test</h3>
+              <div class="row gap wrap">
+                <label class="label">Source</label>
+                <select id="test-source">
+                  <option value="unit">Current unit</option>
+                  <option value="tag">Specific topic/tag</option>
+                  <option value="selected">Selected items (from Library)</option>
+                </select>
+                <select id="test-tag" style="display:none"><option value="">Choose topic</option></select>
+                <button id="open-library-to-select" class="secondary">Select items</button>
+              </div>
+
+              <div class="row gap wrap" style="margin-top:10px">
+                <label class="label">Questions</label>
+                <input id="test-count" type="number" min="5" max="50" value="12" style="width:90px">
+                <label class="label">Mix</label>
+                <select id="test-mix">
+                  <option value="balanced">Balanced</option>
+                  <option value="mcq">Mostly MCQ</option>
+                  <option value="short">Mostly short answer</option>
+                  <option value="cloze">Mostly cloze</option>
+                </select>
+                <button id="start-test">Start test</button>
+              </div>
+
+              <div class="divider"></div>
+              <div class="muted small">Your results also feed skill mastery (Learn tab) and streak.</div>
+            </div>
+
+            <div class="card">
+              <h3>Test session</h3>
+              <div id="test-session" class="panel">—</div>
+            </div>
+          </div>
+        </section>
+
+        <!-- AGLC4 CITATIONS -->
+        <section id="view-citations" class="view" style="display:none">
+          <div class="view-head">
+            <h2>AGLC4 Citation Generator</h2>
+            <div class="muted">Generate AGLC4-style footnote references and keep a history you can reuse for subsequent references.</div>
+          </div>
+
+          <div class="grid two">
+            <div class="card">
+              <div class="row gap wrap">
+                <label class="label" style="min-width:160px">Source type</label>
+                <select id="cite-type">
+                  <option value="case">Case</option>
+                  <option value="legislation">Legislation</option>
+                  <option value="journal">Journal article</option>
+                  <option value="book">Book</option>
+                  <option value="web">Web page / Report</option>
+                </select>
+                <div class="spacer"></div>
+                <button id="cite-clear" class="ghost">Clear form</button>
+              </div>
+
+              <div class="divider"></div>
+
+              <!-- CASE -->
+              <div id="cite-form-case" class="cite-form">
+                <div class="row gap wrap">
+                  <input id="case-name" placeholder="Case name (eg, McGinty v Western Australia)">
+                  <input id="case-year" placeholder="Year (eg, 1995) or [2009]" style="max-width:160px">
+                </div>
+                <div class="row gap wrap" style="margin-top:10px">
+                  <input id="case-report" placeholder="Report series / unique court identifier (eg, 186 CLR 140 or HCA 36)">
+                  <input id="case-start" placeholder="Starting page (if not in report string)" style="max-width:220px">
+                </div>
+                <div class="row gap wrap" style="margin-top:10px">
+                  <input id="case-pinpage" placeholder="Pinpoint page(s) (eg, 185 or 280–1)" style="max-width:260px">
+                  <input id="case-pinpara" placeholder="Pinpoint paragraph(s) (eg, 32 or 18–19)" style="max-width:260px">
+                  <input id="case-jjudge" placeholder="Judge/bench (optional) (eg, Dawson J)" style="flex:1">
+                </div>
+                <div class="row gap wrap" style="margin-top:10px">
+                  <input id="case-short" placeholder="Short title (optional) (eg, ‘Boilermakers’ Case’)" style="flex:1">
+                </div>
+              </div>
+
+              <!-- LEGISLATION -->
+              <div id="cite-form-legislation" class="cite-form" style="display:none">
+                <div class="row gap wrap">
+                  <input id="leg-title" placeholder="Act / Regulation title (eg, Corporations Act)">
+                  <input id="leg-year" placeholder="Year (eg, 2001)" style="max-width:160px">
+                  <select id="leg-jur" style="max-width:220px">
+                    <option value="(Cth)">(Cth)</option>
+                    <option value="(WA)">(WA)</option>
+                    <option value="(NSW)">(NSW)</option>
+                    <option value="(V...">(VIC)</option>
+                    <option value="(Qld)">(Qld)</option>
+                    <option value="(SA)">(SA)</option>
+                    <option value="(Tas)">(Tas)</option>
+                    <option value="(NT)">(NT)</option>
+                    <option value="(ACT)">(ACT)</option>
+                  </select>
+                </div>
+                <div class="row gap wrap" style="margin-top:10px">
+                  <input id="leg-pin" placeholder="Pinpoint (eg, s 5; pt 2 div 3; sch 1)" style="flex:1">
+                  <input id="leg-short" placeholder="Short title (optional)" style="flex:1">
+                </div>
+              </div>
+
+              <!-- JOURNAL -->
+              <div id="cite-form-journal" class="cite-form" style="display:none">
+                <div class="row gap wrap">
+                  <input id="j-authors" placeholder="Author(s) (eg, Leslie Zines)">
+                  <input id="j-title" placeholder="Article title (in quotes)">
+                </div>
+                <div class="row gap wrap" style="margin-top:10px">
+                  <input id="j-year" placeholder="Year (eg, 2005)" style="max-width:160px">
+                  <input id="j-volume" placeholder="Volume (eg, 16)" style="max-width:160px">
+                  <input id="j-issue" placeholder="Issue (optional) (eg, 4)" style="max-width:180px">
+                </div>
+                <div class="row gap wrap" style="margin-top:10px">
+                  <input id="j-journal" placeholder="Journal name (eg, Public Law Review)">
+                  <input id="j-start" placeholder="Starting page (eg, 279)" style="max-width:220px">
+                  <input id="j-pin" placeholder="Pinpoint (eg, 280–1)" style="max-width:220px">
+                </div>
+                <div class="row gap wrap" style="margin-top:10px">
+                  <input id="j-short" placeholder="Short title (optional)" style="flex:1">
+                </div>
+              </div>
+
+              <!-- BOOK -->
+              <div id="cite-form-book" class="cite-form" style="display:none">
+                <div class="row gap wrap">
+                  <input id="b-authors" placeholder="Author(s) (eg, James Edelman and Elise Bant)">
+                  <input id="b-title" placeholder="Book title (eg, Unjust Enrichment)">
+                </div>
+                <div class="row gap wrap" style="margin-top:10px">
+                  <input id="b-publisher" placeholder="Publisher (eg, Hart Publishing)">
+                  <input id="b-ed" placeholder="Edition (optional) (eg, 2nd ed)" style="max-width:180px">
+                  <input id="b-year" placeholder="Year (eg, 2016)" style="max-width:160px">
+                </div>
+                <div class="row gap wrap" style="margin-top:10px">
+                  <input id="b-pin" placeholder="Pinpoint (eg, 37–57)" style="flex:1">
+                  <input id="b-short" placeholder="Short title (optional)" style="flex:1">
+                </div>
+              </div>
+
+              <!-- WEB / REPORT -->
+              <div id="cite-form-web" class="cite-form" style="display:none">
+                <div class="row gap wrap">
+                  <input id="w-author" placeholder="Author / organisation (optional)">
+                  <input id="w-title" placeholder="Title (eg, Annual Report 16:17)">
+                </div>
+                <div class="row gap wrap" style="margin-top:10px">
+                  <select id="w-type" style="max-width:240px">
+                    <option value="Web Page">Web Page</option>
+                    <option value="Report">Report</option>
+                    <option value="Media Release">Media Release</option>
+                    <option value="Submission">Submission</option>
+                    <option value="Other">Other…</option>
+                  </select>
+                  <input id="w-type-other" placeholder="If Other, write type" style="flex:1; display:none">
+                  <input id="w-date" placeholder="Full date (eg, 19 October 2017)" style="max-width:260px">
+                </div>
+                <div class="row gap wrap" style="margin-top:10px">
+                  <input id="w-pin" placeholder="Pinpoint (eg, 77 or 2)" style="max-width:220px">
+                  <input id="w-url" placeholder="URL (will be wrapped in < >)" style="flex:1">
+                </div>
+                <div class="row gap wrap" style="margin-top:10px">
+                  <input id="w-short" placeholder="Short title (optional)" style="flex:1">
+                </div>
+              </div>
+
+              <div class="divider"></div>
+              <div class="row gap wrap">
+                <button id="cite-generate">Generate citation</button>
+                <button id="cite-copy" class="secondary">Copy</button>
+                <button id="cite-save" class="secondary">Save to Library (as note)</button>
+              </div>
+
+              <div style="margin-top:10px">
+                <label class="label">Output</label>
+                <textarea id="cite-output" rows="4" placeholder="Your AGLC4-style citation will appear here…"></textarea>
+                <div class="muted small" style="margin-top:6px">Tip: add your own pinpoint/page/paragraph details to match your source. This tool covers common patterns; always double‑check against AGLC4 for edge cases.</div>
+              </div>
+            </div>
+
+            <div class="card">
+              <div class="row between">
+                <h3>Citation history</h3>
+                <button id="cite-clear-history" class="ghost">Clear history</button>
+              </div>
+              <div class="muted small">Click an entry to copy. Use “Subsequent ref” to generate a shortened form with a cross‑reference.</div>
+              <div id="cite-history" class="list"></div>
+              <div class="divider"></div>
+              <h4>Subsequent reference</h4>
+              <div class="row gap wrap">
+                <input id="cite-sub-n" placeholder="Footnote number (eg, 27)" style="max-width:220px">
+                <input id="cite-sub-pin" placeholder="Pinpoint (optional) (eg, 4 or 404 [32])" style="flex:1">
+              </div>
+              <div class="row gap" style="margin-top:10px">
+                <select id="cite-sub-source"></select>
+                <button id="cite-sub-generate" class="secondary">Generate subsequent ref</button>
+              </div>
+              <textarea id="cite-sub-output" rows="3" placeholder="Shortened subsequent reference…" style="margin-top:10px"></textarea>
+              <div class="muted small" style="margin-top:6px">AGLC4 allows subsequent references for all sources using a shortened form + cross‑reference (n …). See rule 1.4.1. Use “ibid” manually when the immediately preceding footnote cites the same source.</div>
+            </div>
+          </div>
+        </section>
+
+        <!-- TIMETABLE -->
+        <section id="view-timetable" class="view" style="display:none">
+          <div class="view-head">
+            <h2>Timetable</h2>
+            <div class="muted">Plan tutorials, lectures, readings and revision blocks.</div>
+          </div>
+
+          <div class="grid two">
+            <div class="card">
+              <h3>Add session</h3>
+              <div class="row gap wrap">
+                <input id="tt-date" type="date">
+                <input id="tt-time" placeholder="Time (e.g., 18:00)">
+                <input id="tt-activity" placeholder="Activity (e.g., Tutorial 2)">
+                <button id="add-tt">Add</button>
+              </div>
+              <div class="divider"></div>
+              <div class="row gap wrap">
+                <label class="label">Year view</label>
+                <select id="tt-year-select"></select>
+              </div>
+              <div id="year-calendar" style="margin-top:12px"></div>
+            </div>
+
+            <div class="card">
+              <h3>Upcoming</h3>
+              <div id="timetable" class="list"></div>
+            </div>
+          </div>
+        </section>
+
+        <!-- TASKS -->
+        <section id="view-tasks" class="view" style="display:none">
+          <div class="view-head">
+            <h2>To‑Do</h2>
+            <div class="muted">Unit‑linked tasks: readings, case briefs, problem sets, practice exams.</div>
+          </div>
+
+          <div class="grid two">
+            <div class="card">
+              <h3>Tasks</h3>
+              <div class="row gap wrap">
+                <input id="todo-input" placeholder="New task (e.g., Brief Donoghue v Stevenson)">
+                <select id="todo-priority">
+                  <option value="med">Priority: Medium</option>
+                  <option value="high">Priority: High</option>
+                  <option value="low">Priority: Low</option>
+                </select>
+                <input id="todo-due" type="date">
+                <button id="add-todo">Add</button>
+              </div>
+              <div class="divider"></div>
+              <div id="todo-list" class="list"></div>
+            </div>
+
+            <div class="card">
+              <h3>Quick plan</h3>
+              <div class="row gap wrap">
+                <input id="plan-days" type="number" value="7" min="1" style="width:90px">
+                <button id="gen-plan" class="secondary">Generate</button>
+              </div>
+              <div id="plan-output" class="panel" style="margin-top:10px">—</div>
+            </div>
+          </div>
+        </section>
+
+        <!-- EXAM PACK -->
+        <section id="view-exampack" class="view" style="display:none">
+          <div class="view-head">
+            <h2>Exam Pack</h2>
+            <div class="muted">Build a clean, unit‑specific pack of key cases, summaries, checklists and notes.</div>
+          </div>
+
+          <div class="grid two">
+            <div class="card">
+              <h3>Issue checklist</h3>
+              <div class="row gap wrap">
+                <button id="add-issue" class="secondary">Add issue</button>
+                <button id="load-checklist-template" class="secondary">Load template</button>
+              </div>
+              <div class="divider"></div>
+              <div id="issue-checklist" class="list compact"></div>
+            </div>
+
+            <div class="card">
+              <h3>Pack items</h3>
+              <div class="muted small">Pinned items appear here. You can also select from Library for a one‑off export.</div>
+              <div class="divider"></div>
+              <div id="pack-list" class="list compact"></div>
+              <div class="row gap wrap" style="margin-top:10px">
+                <button id="download-pack">Download pack (.txt)</button>
+                <button id="clear-pack" class="danger ghost">Clear</button>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- SETTINGS -->
+        <section id="view-settings" class="view" style="display:none">
+          <div class="view-head">
+            <h2>Settings</h2>
+            <div class="muted">Local demo settings (browser‑stored). For cloud sync you’ll later add Supabase auth/storage.</div>
+          </div>
+
+          <div class="grid two">
+            <div class="card">
+              <h3>Data</h3>
+              <div class="row gap wrap">
+                <button id="export-data" class="secondary">Export JSON</button>
+                <label class="btn secondary" for="import-data">Import JSON</label>
+                <input id="import-data" type="file" accept=".json" style="display:none">
+                <button id="wipe-data" class="danger">Wipe local data</button>
+              </div>
+              <div class="divider"></div>
+              <div class="muted small">
+                Export/import is useful to move between devices until you add a backend.
+              </div>
+            </div>
+
+            <div class="card">
+              <h3>About</h3>
+              <p class="muted">
+                This is a client‑side MVP inspired by Khan Academy (skills/progress) and Quizlet (flashcards/decks).
+                It runs fully in your browser and stores data in <code>localStorage</code>.
+              </p>
+              <ul class="small">
+                <li>Upload: PDF/TXT → text extraction → tag by topic.</li>
+                <li>Revise: highlight, summarise, extract concepts.</li>
+                <li>Learn: practise skills (tags) and build mastery.</li>
+                <li>Flashcards: spaced repetition (due dates).</li>
+                <li>Tests: MCQ + short answer + cloze.</li>
+              </ul>
+            </div>
+          </div>
+        </section>
+
+      </main>
+    </div>
+
+    <footer class="footer">
+      <small>Local demo — data saved in your browser. Serve with a local web server for PDF uploads (e.g., <code>python -m http.server 8000</code>).</small>
+    </footer>
+  </div>
+</body>
+</html>
