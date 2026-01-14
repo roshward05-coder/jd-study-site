@@ -12,51 +12,62 @@
   // issues: {id, unitId, text, done, created}
   // mastery: {unitId, tag -> 0..100}
   // streak: {lastDayISO, count}
-// ========= Supabase (PRIVATE MODE) =========
-const SUPABASE_URL = "https://YOURPROJECT.supabase.co";
-const SUPABASE_ANON_KEY = "YOUR_ANON_KEY";
-const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-// Auth UI elements
-const authEmail = document.getElementById("auth-email");
-const authSend = document.getElementById("auth-send");
-const authLogout = document.getElementById("auth-logout");
-const authStatus = document.getElementById("auth-status");
+  // ========= Supabase (PRIVATE MODE) =========
+  const SUPABASE_URL = "https://YOURPROJECT.supabase.co";
+  const SUPABASE_ANON_KEY = "YOUR_ANON_KEY";
+  const supabase = window.supabase?.createClient?.(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-// Require login for app
-async function requireAuth() {
-  const { data } = await supabase.auth.getSession();
-  const session = data.session;
-  if (!session) {
-    authStatus.textContent = "Please log in to use your private library.";
-    authLogout.style.display = "none";
-    return null;
+  // Auth UI elements
+  const authEmail = document.getElementById("auth-email");
+  const authSend = document.getElementById("auth-send");
+  const authLogout = document.getElementById("auth-logout");
+  const authStatus = document.getElementById("auth-status");
+
+  // Require login for app
+  async function requireAuth() {
+    if (!supabase) {
+      authStatus && (authStatus.textContent = "Supabase client not found. Check you loaded supabase-js.");
+      authLogout && (authLogout.style.display = "none");
+      return null;
+    }
+    const { data } = await supabase.auth.getSession();
+    const session = data.session;
+    if (!session) {
+      authStatus && (authStatus.textContent = "Please log in to use your private library.");
+      authLogout && (authLogout.style.display = "none");
+      return null;
+    }
+    authStatus && (authStatus.textContent = `Logged in: ${session.user.email}`);
+    authLogout && (authLogout.style.display = "inline-flex");
+    return session.user;
   }
-  authStatus.textContent = `Logged in: ${session.user.email}`;
-  authLogout.style.display = "inline-flex";
-  return session.user;
-}
 
-authSend?.addEventListener("click", async () => {
-  const email = (authEmail.value || "").trim();
-  if (!email) return alert("Enter your email.");
-  const { error } = await supabase.auth.signInWithOtp({ email });
-  if (error) return alert(error.message);
-  alert("Login link sent! Check your email.");
-});
-
-authLogout?.addEventListener("click", async () => {
-  await supabase.auth.signOut();
-  location.reload();
-});
-
-// Update UI when auth changes
-supabase.auth.onAuthStateChange(() => {
-  requireAuth().then(() => {
-    // After login, reload your library/unit stats from cloud
-    if (typeof cloudLoadAll === "function") cloudLoadAll();
+  authSend?.addEventListener("click", async () => {
+    const email = (authEmail.value || "").trim();
+    if (!email) return alert("Enter your email.");
+    const { error } = await supabase.auth.signInWithOtp({ email });
+    if (error) return alert(error.message);
+    alert("Login link sent! Check your email.");
   });
-});
+
+  authLogout?.addEventListener("click", async () => {
+    await supabase.auth.signOut();
+    location.reload();
+  });
+
+  // Optional: cloud reload hook (no-op unless you implement full cloud Library sync)
+  function cloudLoadAll() {
+    // Intentionally minimal: you can later load Supabase rows into your Library UI
+    // if you choose to make Library fully cloud-backed too.
+  }
+
+  // Update UI when auth changes
+  supabase?.auth?.onAuthStateChange?.(() => {
+    requireAuth().then(() => {
+      cloudLoadAll();
+    });
+  });
 
   const KEY = {
     V: 'jdh_v',
@@ -108,76 +119,109 @@ supabase.auth.onAuthStateChange(() => {
       .filter(Boolean)
       .slice(0, 20);
   }
-function safeFilename(name) {
-  return name.replace(/[^\w.\-]+/g, "_");
-}
 
-async function cloudUploadPdf(file) {
-  const user = await requireAuth();
-  if (!user) throw new Error("Not logged in.");
-
-  const path = `${user.id}/${Date.now()}_${safeFilename(file.name)}`;
-
-  const { error } = await supabase
-    .storage
-    .from("library")
-    .upload(path, file, { contentType: "application/pdf", upsert: false });
-
-  if (error) throw error;
-  return path;
-}
-
-async function cloudSignedUrl(storagePath) {
-  const { data, error } = await supabase
-    .storage
-    .from("library")
-    .createSignedUrl(storagePath, 60 * 30); // 30 minutes
-
-  if (error) throw error;
-  return data.signedUrl;
-}
-
-async function cloudInsertLibraryItem(item) {
-  const user = await requireAuth();
-  if (!user) throw new Error("Not logged in.");
-
-  const payload = { ...item, user_id: user.id };
-  const { error } = await supabase.from("library_items").insert(payload);
-  if (error) throw error;
-}
-
-async function cloudFetchLibraryItems(unit) {
-  const user = await requireAuth();
-  if (!user) return [];
-
-  const q = supabase
-    .from("library_items")
-    .select("*")
-    .eq("user_id", user.id)
-    .order("created_at", { ascending: false });
-
-  const { data, error } = unit ? await q.eq("unit", unit) : await q;
-  if (error) throw error;
-  return data || [];
-}
-
-async function cloudDeleteLibraryItem(id, storagePath) {
-  const user = await requireAuth();
-  if (!user) throw new Error("Not logged in.");
-
-  const { error: dbErr } = await supabase
-    .from("library_items")
-    .delete()
-    .eq("id", id)
-    .eq("user_id", user.id);
-
-  if (dbErr) throw dbErr;
-
-  if (storagePath) {
-    const { error: stErr } = await supabase.storage.from("library").remove([storagePath]);
-    if (stErr) console.warn("Storage delete failed:", stErr.message);
+  function safeFilename(name) {
+    return name.replace(/[^\w.\-]+/g, "_");
   }
-}
+
+  // Minimal toast helper (optional)
+  function toast(msg) {
+    // If you have a toast UI, plug it in. Otherwise fall back:
+    console.log(msg);
+  }
+
+  // ----------------------------
+  // Supabase storage + DB helpers
+  // ----------------------------
+  async function cloudUploadPdf(file) {
+    const user = await requireAuth();
+    if (!user) throw new Error("Not logged in.");
+
+    const path = `${user.id}/${Date.now()}_${safeFilename(file.name)}`;
+
+    const { error } = await supabase
+      .storage
+      .from("library")
+      .upload(path, file, { contentType: "application/pdf", upsert: false });
+
+    if (error) throw error;
+    return path;
+  }
+
+  async function cloudSignedUrl(storagePath) {
+    const { data, error } = await supabase
+      .storage
+      .from("library")
+      .createSignedUrl(storagePath, 60 * 30); // 30 minutes
+
+    if (error) throw error;
+    return data.signedUrl;
+  }
+
+  async function cloudInsertLibraryItem(item) {
+    const user = await requireAuth();
+    if (!user) throw new Error("Not logged in.");
+
+    const payload = { ...item, user_id: user.id };
+    const { error } = await supabase.from("library_items").insert(payload);
+    if (error) throw error;
+  }
+
+  async function cloudFetchLibraryItems(unit) {
+    const user = await requireAuth();
+    if (!user) return [];
+
+    const q = supabase
+      .from("library_items")
+      .select("*")
+      .eq("user_id", user.id)
+      .order("created_at", { ascending: false });
+
+    const { data, error } = unit ? await q.eq("unit", unit) : await q;
+    if (error) throw error;
+    return data || [];
+  }
+
+  async function cloudDeleteLibraryItem(id, storagePath) {
+    const user = await requireAuth();
+    if (!user) throw new Error("Not logged in.");
+
+    const { error: dbErr } = await supabase
+      .from("library_items")
+      .delete()
+      .eq("id", id)
+      .eq("user_id", user.id);
+
+    if (dbErr) throw dbErr;
+
+    if (storagePath) {
+      const { error: stErr } = await supabase.storage.from("library").remove([storagePath]);
+      if (stErr) console.warn("Storage delete failed:", stErr.message);
+    }
+  }
+
+  // ✅ Seamless Library → Tests: corpus only from Supabase rows
+  async function getTestCorpus({ unit, tag, selectedIds }) {
+    const items = await cloudFetchLibraryItems(unit);
+
+    let filtered = items;
+
+    if (tag) {
+      filtered = filtered.filter(it => (it.tags || []).includes(tag));
+    }
+
+    if (selectedIds && selectedIds.length) {
+      const set = new Set(selectedIds);
+      filtered = filtered.filter(it => set.has(it.id));
+    }
+
+    // Only include items with text
+    filtered = filtered.filter(it => (it.content_text || "").trim().length > 0);
+
+    // Return combined corpus text
+    const corpus = filtered.map(it => it.content_text).join("\n\n");
+    return { items: filtered, corpus };
+  }
 
   // ----------------------------
   // Migration from older demo
@@ -185,8 +229,6 @@ async function cloudDeleteLibraryItem(id, storagePath) {
   function migrateIfNeeded() {
     const v = load(KEY.V, 0);
 
-    // If user is coming from the earlier scaffold in this repo,
-    // try to convert sd_* keys into new schema.
     if (v >= VERSION) return;
 
     const oldUnits = load('sd_units', []);
@@ -206,11 +248,9 @@ async function cloudDeleteLibraryItem(id, storagePath) {
     let mastery = load(KEY.MASTERY, {});
     let streak = load(KEY.STREAK, { lastDayISO: null, count: 0 });
 
-    // If new store empty but old store has data, migrate.
     const newEmpty = units.length === 0 && items.length === 0 && decks.length === 0;
 
     if (newEmpty && (oldDocs.length || oldLectures.length || oldUnits.length)) {
-      // units
       if (oldUnits.length) {
         units = oldUnits.map((u) => ({ id: u.id || uid(), name: u.name, created: now() }));
       } else {
@@ -219,7 +259,6 @@ async function cloudDeleteLibraryItem(id, storagePath) {
 
       const fallbackUnit = units[0].id;
 
-      // items from docs + lectures
       const mapOld = (d, type) => ({
         id: d.id || uid(),
         unitId: fallbackUnit,
@@ -234,7 +273,6 @@ async function cloudDeleteLibraryItem(id, storagePath) {
       const fromLectures = oldLectures.map((l) => mapOld(l, 'lecture'));
       items = [...fromDocs, ...fromLectures];
 
-      // decks
       decks = oldDecks.map((dk) => ({
         id: dk.id || uid(),
         unitId: fallbackUnit,
@@ -250,7 +288,6 @@ async function cloudDeleteLibraryItem(id, storagePath) {
         }))
       }));
 
-      // timetable
       timetable = oldTT.map((t) => ({
         id: t.id || uid(),
         unitId: fallbackUnit,
@@ -260,7 +297,6 @@ async function cloudDeleteLibraryItem(id, storagePath) {
         created: now()
       }));
 
-      // todos
       todos = oldTodos.map((t) => ({
         id: t.id || uid(),
         unitId: fallbackUnit,
@@ -271,7 +307,6 @@ async function cloudDeleteLibraryItem(id, storagePath) {
         created: now()
       }));
 
-      // issues
       issues = oldIssues.map((it) => ({
         id: it.id || uid(),
         unitId: fallbackUnit,
@@ -309,7 +344,6 @@ async function cloudDeleteLibraryItem(id, storagePath) {
   let streak = load(KEY.STREAK, { lastDayISO: null, count: 0 });
   let selectedForTest = load(KEY.SELECTED_FOR_TEST, []);
 
-  // AGLC4 citation history: {id, type, full, shortTitle, created}
   let citations = load(KEY.CITATIONS, []);
 
   let activeUnitId = null;
@@ -401,7 +435,7 @@ async function cloudDeleteLibraryItem(id, storagePath) {
   });
 
   // ----------------------------
-  // Library: adding / uploading
+  // Library: adding / uploading (LOCAL MVP)
   // ----------------------------
   async function extractTextFromPDF(file) {
     try {
@@ -527,7 +561,6 @@ async function cloudDeleteLibraryItem(id, storagePath) {
       list.appendChild(div);
     });
 
-    // If nothing open yet, open first
     if (!openItemId && filtered[0]) openLibraryItem(filtered[0].id);
   }
 
@@ -550,7 +583,6 @@ async function cloudDeleteLibraryItem(id, storagePath) {
     }
   });
 
-  // Highlight selection (wrap selection in <mark>)
   function wrapSelectionWithMark(container) {
     const sel = window.getSelection();
     if (!sel || sel.rangeCount === 0 || sel.isCollapsed) return false;
@@ -566,7 +598,6 @@ async function cloudDeleteLibraryItem(id, storagePath) {
   $('#highlight-btn')?.addEventListener('click', () => {
     const body = $('#doc-body');
     if (!body) return;
-    // Use rich text during highlight; then save back as plain text with \n.
     if (body.getAttribute('contenteditable') !== 'true') {
       body.setAttribute('contenteditable', 'true');
       $('#toggle-edit').textContent = 'Save';
@@ -575,18 +606,15 @@ async function cloudDeleteLibraryItem(id, storagePath) {
     if (!ok) return alert('Select text in the open item to highlight.');
   });
 
-  // Save highlights when leaving edit mode or on demand by converting to plain text
   function persistOpenItemFromBody() {
     const body = $('#doc-body');
     if (!body || !openItemId) return;
     const it = items.find((x) => x.id === openItemId);
     if (!it) return;
-    // Strip mark tags but keep text.
     it.content = body.textContent || '';
     save(KEY.ITEMS, items);
   }
 
-  // Delete open item
   $('#delete-open')?.addEventListener('click', () => {
     if (!openItemId) return;
     const it = items.find((x) => x.id === openItemId);
@@ -601,7 +629,6 @@ async function cloudDeleteLibraryItem(id, storagePath) {
     renderUnitCards();
   });
 
-  // Pin to exam pack
   $('#pin-to-exampack')?.addEventListener('click', () => {
     if (!openItemId) return;
     const it = items.find((x) => x.id === openItemId);
@@ -663,7 +690,6 @@ async function cloudDeleteLibraryItem(id, storagePath) {
       .slice(0, max * 2)
       .map(([w]) => w);
 
-    // Also pick capitalised phrases (case names, doctrines)
     const caps = (text || '').match(/\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,3}\b/g) || [];
     const capRank = [...new Set(caps)]
       .filter((p) => p.length >= 8 && p.split(' ').length <= 4)
@@ -795,7 +821,6 @@ async function cloudDeleteLibraryItem(id, storagePath) {
     loadDeck(deckId);
   });
 
-  // Create deck from open item (Quizlet-ish)
   function makeClozeCards(text, limit = 30) {
     const sents = (text || '')
       .split(/[\.!?]\s+/)
@@ -807,7 +832,6 @@ async function cloudDeleteLibraryItem(id, storagePath) {
     return sents.slice(0, limit).map((s) => {
       const words = s.split(/\s+/);
       let pivot = words.reduce((best, w) => (w.length > best.length ? w : best), '');
-      // Prefer concept words if present
       for (const c of concepts) {
         const re = new RegExp(`\\b${c}\\b`, 'i');
         if (re.test(s) && c.length >= 5) { pivot = c; break; }
@@ -855,10 +879,9 @@ async function cloudDeleteLibraryItem(id, storagePath) {
     setTimeout(() => $('#create-deck-from-open')?.click(), 50);
   });
 
-  // Flashcard session
   let currentDeckId = null;
   let currentCardIndex = 0;
-  let reviewMode = 'all'; // all | due
+  let reviewMode = 'all';
 
   function currentDeck() {
     return decks.find((d) => d.id === currentDeckId);
@@ -1076,20 +1099,15 @@ async function cloudDeleteLibraryItem(id, storagePath) {
   // ----------------------------
   // Tests: generate MCQ / short / cloze
   // ----------------------------
-  function pickSourcesForTest(mode, tag) {
-    if (mode === 'selected') {
-      return unitItems().filter((it) => selectedForTest.includes(it.id));
-    }
-    if (mode === 'tag') {
-      return unitItems().filter((it) => (it.tags || []).includes(tag));
-    }
-    return unitItems();
-  }
-
+  // ✅ Updated to use Supabase fields safely (content_text)
   function buildQuestionBank(sourceItems) {
     const bank = [];
+
+    const getText = (it) => (it.content_text ?? it.content ?? "").toString();
+    const getTags = (it) => Array.isArray(it.tags) ? it.tags : [];
+
     sourceItems.forEach((it) => {
-      const text = it.content || '';
+      const text = getText(it);
       if (!text.trim()) return;
 
       const concepts = extractConcepts(text, 20);
@@ -1097,11 +1115,14 @@ async function cloudDeleteLibraryItem(id, storagePath) {
 
       // Cloze from sentences
       sents.slice(0, 14).forEach((s) => {
-        const pick = concepts.find((c) => new RegExp(`\\b${c.split(' ')[0]}\\b`, 'i').test(s)) || concepts[0];
+        const pick =
+          concepts.find((c) => new RegExp(`\\b${c.split(' ')[0]}\\b`, 'i').test(s)) ||
+          concepts[0];
         if (!pick) return;
+
         const term = pick.split(' ')[0];
         const q = s.replace(new RegExp(`\\b${term}\\b`, 'i'), '_____');
-        bank.push({ type: 'cloze', q, a: term, tags: it.tags || [], itemId: it.id });
+        bank.push({ type: 'cloze', q, a: term, tags: getTags(it), itemId: it.id });
       });
 
       // Short answer prompts from concepts
@@ -1110,17 +1131,18 @@ async function cloudDeleteLibraryItem(id, storagePath) {
           type: 'short',
           q: `Explain: ${c}`,
           a: '',
-          tags: it.tags || [],
+          tags: getTags(it),
           itemId: it.id,
-          hint: `Look for mentions of “${c}” in ${it.title}.`
+          hint: `Look for mentions of “${c}” in ${it.title || 'this item'}.`
         });
       });
     });
 
     // MCQ from global concept pool across items
     const allConcepts = [];
-    sourceItems.forEach((it) => extractConcepts(it.content || '', 16).forEach((c) => allConcepts.push(c)));
+    sourceItems.forEach((it) => extractConcepts((it.content_text ?? it.content ?? ""), 16).forEach((c) => allConcepts.push(c)));
     const uniq = [...new Set(allConcepts)].filter((c) => c.length >= 4);
+
     const distract = (ans) => {
       const pool = uniq.filter((x) => x !== ans);
       const picks = [];
@@ -1130,6 +1152,7 @@ async function cloudDeleteLibraryItem(id, storagePath) {
       }
       return picks;
     };
+
     uniq.slice(0, 25).forEach((ans) => {
       const opts = [...distract(ans), ans].sort(() => Math.random() - 0.5);
       bank.push({
@@ -1179,287 +1202,18 @@ async function cloudDeleteLibraryItem(id, storagePath) {
 
   function renderTestBuilderUI() {
     const src = $('#test-source')?.value;
-    $('#test-tag').style.display = (src === 'tag') ? 'block' : 'none';
-  }
-
-  // ----------------------------
-  // AGLC4 citations (client-side helper)
-  // ----------------------------
-  function showCiteForm(type) {
-    const forms = {
-      case: $('#cite-form-case'),
-      legislation: $('#cite-form-legislation'),
-      journal: $('#cite-form-journal'),
-      book: $('#cite-form-book'),
-      web: $('#cite-form-web'),
-    };
-    Object.entries(forms).forEach(([k, el]) => {
-      if (!el) return;
-      el.style.display = (k === type) ? 'block' : 'none';
-    });
-  }
-
-  // Very small helpers — this is not a complete AGLC4 engine.
-  const clean = (s) => (s || '').toString().trim();
-  const join = (parts, sep = ' ') => parts.filter(Boolean).join(sep).replace(/\s+/g, ' ').trim();
-  const wrapAngle = (url) => {
-    const u = clean(url);
-    if (!u) return '';
-    return u.startsWith('<') ? u : `<${u}>`;
-  };
-
-  // Pinpoints: AGLC uses no 'p'/'pg' and paragraph numbers in [ ].
-  // We let users type a preformatted pinpoint, but offer page/para inputs for cases.
-  function casePinpoint(page, para) {
-    const p = clean(page);
-    const q = clean(para);
-    if (p && q) return `${p} [${q}]`;
-    if (p) return p;
-    if (q) return `[${q}]`;
-    return '';
-  }
-
-  function formatCase() {
-    const name = clean($('#case-name')?.value);
-    const year = clean($('#case-year')?.value);
-    const report = clean($('#case-report')?.value);
-    const start = clean($('#case-start')?.value);
-    const pin = casePinpoint($('#case-pinpage')?.value, $('#case-pinpara')?.value);
-    const judge = clean($('#case-jjudge')?.value);
-    const short = clean($('#case-short')?.value);
-
-    // Accept either:
-    // - Reported: Name (YEAR) VOL REPORT START, PIN (JUDGE) ('SHORT').
-    // - Medium neutral: Name [YEAR] COURTID JNO, [PIN] (JUDGE) ('SHORT').
-    // We keep it flexible by trusting the user's report string.
-    const core = join([
-      name,
-      year ? (year.startsWith('[') ? year : `(${year})`) : '',
-      report,
-      start
-    ]);
-    const withPin = pin ? `${core}, ${pin}` : core;
-    const withJudge = judge ? `${withPin} (${judge})` : withPin;
-    const withShort = short ? `${withJudge} (‘${short.replace(/^‘|’$/g,'').replace(/^'|"|’|‘/g,'').replace(/'|"|’|‘$/g,'')}’)` : withJudge;
-    return withShort ? `${withShort}.` : '';
-  }
-
-  function formatLegislation() {
-    const title = clean($('#leg-title')?.value);
-    const year = clean($('#leg-year')?.value);
-    const jur = clean($('#leg-jur')?.value);
-    const pin = clean($('#leg-pin')?.value);
-    const short = clean($('#leg-short')?.value);
-    const core = join([title, year, jur]);
-    const withPin = pin ? `${core} ${pin}` : core;
-    const withShort = short ? `${withPin} (‘${short}’)` : withPin;
-    return withShort ? `${withShort}.` : '';
-  }
-
-  function formatJournal() {
-    const author = clean($('#j-author')?.value);
-    const title = clean($('#j-title')?.value);
-    const year = clean($('#j-year')?.value);
-    const vol = clean($('#j-vol')?.value);
-    const issue = clean($('#j-issue')?.value);
-    const journal = clean($('#j-journal')?.value);
-    const start = clean($('#j-start')?.value);
-    const pin = clean($('#j-pin')?.value);
-    const short = clean($('#j-short')?.value);
-
-    const volIssue = issue ? `${vol}(${issue})` : vol;
-    const core = join([
-      author ? `${author},` : '',
-      title ? `‘${title}’,` : '',
-      year ? `(${year})` : '',
-      volIssue,
-      journal,
-      start
-    ]);
-    const withPin = pin ? `${core}, ${pin}` : core;
-    const withShort = short ? `${withPin} (‘${short}’)` : withPin;
-    return withShort ? `${withShort}.` : '';
-  }
-
-  function formatBook() {
-    const author = clean($('#b-author')?.value);
-    const title = clean($('#b-title')?.value);
-    const publisher = clean($('#b-publisher')?.value);
-    const edition = clean($('#b-edition')?.value);
-    const year = clean($('#b-year')?.value);
-    const pin = clean($('#b-pin')?.value);
-    const short = clean($('#b-short')?.value);
-
-    const ed = edition ? `${edition} ed,` : '';
-    const core = join([
-      author ? `${author},` : '',
-      title,
-      `(${join([publisher, ed, year], ' ')})`
-    ]);
-    const withPin = pin ? `${core} ${pin}` : core;
-    const withShort = short ? `${withPin} (‘${short}’)` : withPin;
-    return withShort ? `${withShort}.` : '';
-  }
-
-  function formatWeb() {
-    const author = clean($('#w-author')?.value);
-    const title = clean($('#w-title')?.value);
-    const type = clean($('#w-type')?.value) || 'Web Page';
-    const date = clean($('#w-date')?.value);
-    const pin = clean($('#w-pin')?.value);
-    const url = wrapAngle($('#w-url')?.value);
-    const short = clean($('#w-short')?.value);
-
-    // URL handling (angle brackets, end of citation, no retrieval date).
-    // (AGLC4 rule 4.4)
-    const core = join([
-      author ? `${author},` : '',
-      title ? `‘${title}’` : '',
-      `(${type}${date ? `, ${date}` : ''})`
-    ]);
-    const withPin = pin ? `${core} ${pin}` : core;
-    const withUrl = url ? `${withPin} ${url}` : withPin;
-    const withShort = short ? `${withUrl} (‘${short}’)` : withUrl;
-    return withShort ? `${withShort}.` : '';
-  }
-
-  function buildCitationFromForm(type) {
-    switch (type) {
-      case 'case': return formatCase();
-      case 'legislation': return formatLegislation();
-      case 'journal': return formatJournal();
-      case 'book': return formatBook();
-      case 'web': return formatWeb();
-      default: return '';
-    }
-  }
-
-  function renderCitationHistory() {
-    const list = $('#cite-history');
-    const sel = $('#cite-sub-source');
-    if (!list) return;
-    list.innerHTML = '';
-    if (sel) {
-      sel.innerHTML = '<option value="">Choose saved citation…</option>';
-    }
-
-    citations.slice().reverse().forEach((c) => {
-      const div = document.createElement('div');
-      div.className = 'item';
-      div.innerHTML = `
-        <div class="row between">
-          <strong>${escapeHTML(c.shortTitle || c.type.toUpperCase())}</strong>
-          <span class="badge">#${c.n}</span>
-        </div>
-        <div class="muted small">${escapeHTML(c.full)}</div>
-      `;
-      div.addEventListener('click', async () => {
-        await navigator.clipboard?.writeText(c.full);
-        toast('Copied citation');
-      });
-      list.appendChild(div);
-      if (sel) {
-        const opt = document.createElement('option');
-        opt.value = c.id;
-        opt.textContent = `#${c.n} — ${c.shortTitle || c.type}`;
-        sel.appendChild(opt);
-      }
-    });
-  }
-
-  function initCitations() {
-    const typeSel = $('#cite-type');
-    const out = $('#cite-output');
-
-    typeSel?.addEventListener('change', () => showCiteForm(typeSel.value));
-    showCiteForm(typeSel?.value || 'case');
-
-    $('#cite-clear')?.addEventListener('click', () => {
-      $$('#view-citations input, #view-citations textarea').forEach((el) => {
-        if (el.id === 'cite-output' || el.id === 'cite-sub-output') return;
-        el.value = '';
-      });
-      toast('Cleared');
-    });
-
-    $('#cite-generate')?.addEventListener('click', () => {
-      const type = typeSel?.value || 'case';
-      const citation = buildCitationFromForm(type);
-      if (!citation) return toast('Fill in the fields first');
-      if (out) out.value = citation;
-    });
-
-    $('#cite-copy')?.addEventListener('click', async () => {
-      const v = clean(out?.value);
-      if (!v) return toast('Nothing to copy');
-      await navigator.clipboard?.writeText(v);
-      toast('Copied');
-    });
-
-    $('#cite-save')?.addEventListener('click', () => {
-      const type = typeSel?.value || 'case';
-      const full = clean(out?.value) || buildCitationFromForm(type);
-      if (!full) return toast('Generate a citation first');
-
-      // best-effort shortTitle: prefer per-form short title fields
-      const shortTitle = clean($('#case-short')?.value) || clean($('#leg-short')?.value) || clean($('#j-short')?.value) || clean($('#b-short')?.value) || clean($('#w-short')?.value) || type;
-
-      const entry = { id: uid(), type, full, shortTitle, created: now(), n: (citations.reduce((m,c)=>Math.max(m, c.n||0), 0) + 1) };
-      citations.push(entry);
-      save(KEY.CITATIONS, citations);
-      renderCitationHistory();
-
-      // Save to library as a note for the current unit
-      const title = `Citation — ${shortTitle}`;
-      const item = { id: uid(), unitId: activeUnitId, title, type: 'note', tags: ['citation'], content: full, created: now(), pinned: false };
-      items.unshift(item);
-      save(KEY.ITEMS, items);
-      renderLibrary();
-      renderStats();
-
-      toast('Saved to Library');
-    });
-
-    $('#cite-clear-history')?.addEventListener('click', () => {
-      citations = [];
-      save(KEY.CITATIONS, citations);
-      renderCitationHistory();
-      toast('History cleared');
-    });
-
-    $('#cite-sub-generate')?.addEventListener('click', () => {
-      const id = clean($('#cite-sub-source')?.value);
-      const n = clean($('#cite-sub-n')?.value);
-      const pin = clean($('#cite-sub-pin')?.value);
-      const target = citations.find((c) => c.id === id);
-      if (!target) return toast('Choose a saved citation');
-      if (!n) return toast('Add the footnote number');
-
-      // AGLC4 subsequent reference pattern: short form + (n X) + pinpoint.
-      // (AGLC4 rule 1.4.1)
-      const short = target.shortTitle ? `${target.shortTitle} (n ${n})` : `${target.type} (n ${n})`;
-      const outSub = $('#cite-sub-output');
-      const full = pin ? `${short} ${pin}.` : `${short}.`;
-      if (outSub) outSub.value = full;
-    });
-
-    $('#cite-sub-output')?.addEventListener('focus', () => {
-      // convenience: select all
-      const el = $('#cite-sub-output');
-      el?.select?.();
-    });
-
-    renderCitationHistory();
+    const tagEl = $('#test-tag');
+    if (tagEl) tagEl.style.display = (src === 'tag') ? 'block' : 'none';
   }
 
   $('#test-source')?.addEventListener('change', renderTestBuilderUI);
 
   $('#open-library-to-select')?.addEventListener('click', () => {
     show('library');
-    alert('Tip: use global search + filters, then choose items for testing by clicking “Select for test” in the list (added at bottom of each item).');
+    alert('Tip: double-click an item in the Library list to toggle “selected for test”.');
   });
 
-  // We add selection UI by double-clicking an item in library list
+  // Selection (still local-list based until your Library view is cloud-backed)
   $('#library-list')?.addEventListener('dblclick', (e) => {
     const itemDiv = e.target.closest('.item');
     if (!itemDiv) return;
@@ -1472,17 +1226,38 @@ async function cloudDeleteLibraryItem(id, storagePath) {
     itemDiv.style.outline = selectedForTest.includes(id) ? '2px solid rgba(45,212,191,0.65)' : 'none';
   });
 
-  function startTestSession() {
+  // ✅ Replaced: Tests now fetch from Supabase rows only (unit/tag/selectedIds filtering)
+  async function startTestSession() {
     const mode = $('#test-source')?.value || 'unit';
     const tag = $('#test-tag')?.value || '';
     const count = clamp(parseInt($('#test-count')?.value || '12', 10), 5, 50);
     const mix = $('#test-mix')?.value || 'balanced';
 
-    const sources = pickSourcesForTest(mode, tag);
-    if (!sources.length) return alert('No source items for this test yet.');
+    // Unit name is what your Supabase rows store in `unit`
+    const unit = activeUnitName();
+
+    // Selected ids: only reliable if those ids are Supabase ids.
+    const selectedIds = (mode === 'selected') ? (selectedForTest || []) : [];
+
+    let result;
+    try {
+      result = await getTestCorpus({
+        unit,
+        tag: (mode === 'tag') ? tag : '',
+        selectedIds: (mode === 'selected') ? selectedIds : []
+      });
+    } catch (err) {
+      console.error(err);
+      return alert('Failed to load test corpus from Supabase: ' + (err?.message || err));
+    }
+
+    const sources = result.items || [];
+    if (!sources.length) {
+      return alert('No Supabase library items found for this test (or none have extracted text).');
+    }
 
     const bank = buildQuestionBank(sources);
-    if (!bank.length) return alert('Your sources need more text content to generate questions.');
+    if (!bank.length) return alert('Your Supabase items need more text content to generate questions.');
 
     const qs = selectQuestions(bank, count, mix);
 
@@ -1491,9 +1266,11 @@ async function cloudDeleteLibraryItem(id, storagePath) {
     const touchedTags = new Set();
 
     const container = $('#test-session');
+
     const render = () => {
       const q = qs[i];
       if (!q) return;
+
       const progress = `<div class="muted small">Question ${i + 1}/${qs.length}</div>`;
 
       if (q.type === 'mcq') {
@@ -1505,7 +1282,7 @@ async function cloudDeleteLibraryItem(id, storagePath) {
             ${q.options.map((opt) => `<div class="item" data-opt="${escapeHtml(opt)}">${escapeHtml(opt)}</div>`).join('')}
           </div>
           <div class="divider"></div>
-          <div class="muted small">Score: ${correct}/${i}</div>
+          <div class="muted small">Score: ${Math.round(correct * 10) / 10}/${i}</div>
         `;
         $$('#test-session .item').forEach((el) => {
           el.addEventListener('click', () => {
@@ -1536,11 +1313,12 @@ async function cloudDeleteLibraryItem(id, storagePath) {
           </div>
           <div id="cloze-feedback" class="muted small" style="margin-top:10px"></div>
           <div class="divider"></div>
-          <div class="muted small">Score: ${correct}/${i}</div>
+          <div class="muted small">Score: ${Math.round(correct * 10) / 10}/${i}</div>
         `;
         $('#cloze-submit').addEventListener('click', () => {
           const a = ($('#cloze-answer').value || '').trim().toLowerCase();
-          const ok = a && q.a.toLowerCase().includes(a) || a.includes(q.a.toLowerCase());
+          const expected = (q.a || '').toLowerCase();
+          const ok = a && (expected.includes(a) || a.includes(expected));
           if (ok) correct += 1;
           (q.tags || []).forEach((t) => touchedTags.add(t));
           $('#cloze-feedback').textContent = ok ? 'Correct.' : `Not quite. Expected: ${q.a}`;
@@ -1567,11 +1345,10 @@ async function cloudDeleteLibraryItem(id, storagePath) {
           <button id="short-skip" class="secondary">Skip</button>
         </div>
         <div class="divider"></div>
-        <div class="muted small">Score: ${correct}/${i}</div>
+        <div class="muted small">Score: ${Math.round(correct * 10) / 10}/${i}</div>
       `;
       $('#short-done').addEventListener('click', () => {
-        // We can't grade short answers locally; treat as completion.
-        correct += 0.6; // partial credit to encourage practice
+        correct += 0.6;
         (q.tags || []).forEach((t) => touchedTags.add(t));
         i += 1;
         if (i >= qs.length) return finish();
@@ -1586,7 +1363,6 @@ async function cloudDeleteLibraryItem(id, storagePath) {
 
     const finish = () => {
       bumpStreak();
-      // Update mastery: reward touched tags proportional to score
       const pct = Math.round((correct / qs.length) * 100);
       const delta = pct >= 80 ? 8 : pct >= 60 ? 4 : 2;
       adjustMastery(Array.from(touchedTags), delta);
@@ -1888,7 +1664,7 @@ async function cloudDeleteLibraryItem(id, storagePath) {
         'Relevant law (rules, tests)',
         'Application to facts',
         'Conclusion',
-        'Counter‑arguments',
+        'Counter-arguments',
         'Remedies / orders'
       ]
     };
@@ -2175,7 +1951,6 @@ async function cloudDeleteLibraryItem(id, storagePath) {
   // Refresh / init
   // ----------------------------
   function refreshAll() {
-    // reload from storage (in case other tabs modified)
     units = load(KEY.UNITS, units);
     items = load(KEY.ITEMS, items);
     decks = load(KEY.DECKS, decks);
@@ -2218,7 +1993,6 @@ async function cloudDeleteLibraryItem(id, storagePath) {
   ensureDefaultUnit();
   renderUnitSelect();
   refreshAll();
-  initCitations();
   show('units');
 
 })();
