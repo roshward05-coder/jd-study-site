@@ -50,7 +50,10 @@ body.theme-light{
 a{color:inherit}
 code{font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace}
 
-#app{min-height:100%; display:flex; flex-direction:column}
+#app{min-height:100%; display:flex; flex-direction:column}'
+
+#auth-status { white-space: nowrap; }
+#auth-box input { background:#fff; color:#0b1220; }
 
 /* Topbar */
 .topbar{
