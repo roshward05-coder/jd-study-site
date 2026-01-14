@@ -47,7 +47,12 @@
   if (!supabase) return alert("Supabase not loaded. Add the supabase-js script tag in index.html.");
   const email = (authEmail?.value || "").trim();
   if (!email) return alert("Enter your email.");
-  const { error } = await supabase.auth.signInWithOtp({ email });
+  const { error } = await supabase.auth.signInWithOtp({
+  email,
+  options: {
+    emailRedirectTo: window.location.origin
+  }
+});
     if (error) return alert(error.message);
     alert("Login link sent! Check your email.");
   });
@@ -2295,6 +2300,12 @@ $('#filter-tag')?.addEventListener('change', rerenderLibrarySmart);
   refreshAll();
   show('units');
 window.addEventListener("load", async () => {
+  if (supabase) {
+    // Supabase will parse the URL hash (access_token) and store the session automatically.
+    // This call ensures the session is hydrated after returning from the email link.
+    await supabase.auth.getSession();
+  }
+
   const user = await requireAuth();
   if (!user) {
     show('units');
