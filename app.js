@@ -44,9 +44,10 @@
   }
 
   authSend?.addEventListener("click", async () => {
-    const email = (authEmail.value || "").trim();
-    if (!email) return alert("Enter your email.");
-    const { error } = await supabase.auth.signInWithOtp({ email });
+  if (!supabase) return alert("Supabase not loaded. Add the supabase-js script tag in index.html.");
+  const email = (authEmail?.value || "").trim();
+  if (!email) return alert("Enter your email.");
+  const { error } = await supabase.auth.signInWithOtp({ email });
     if (error) return alert(error.message);
     alert("Login link sent! Check your email.");
   });
@@ -262,6 +263,47 @@
   await page.render({ canvasContext: ctx, viewport }).promise;
 }
 
+  // ============================
+// Cloud-first mode glue
+// ============================
+let cloudCache = {
+  isReady: false,
+  items: [],     // rows from Supabase for active unit (and/or all units)
+  byId: new Map()
+};
+
+async function isLoggedIn() {
+  if (!supabase) return false;
+  const { data } = await supabase.auth.getSession();
+  return !!data?.session;
+}
+
+// Normalize a Supabase row into the shape your app already expects.
+function rowToLocalShape(r) {
+  return {
+    id: r.id,
+    unitId: activeUnitId,                 // keep your internal unitId
+    title: r.title || "Untitled",
+    type: r.type || "note",
+    tags: Array.isArray(r.tags) ? r.tags : [],
+    content: r.content_text || "",        // your app expects `content`
+    created: r.created_at ? new Date(r.created_at).getTime() : now(),
+    pinned: false,
+    // keep original row fields if needed:
+    _cloud: true,
+    storage_path: r.storage_path || null
+  };
+}
+
+// Replace your local unitItems() to prefer cloud when logged in
+async function unitItemsSmart() {
+  const logged = await isLoggedIn();
+  if (logged && cloudCache.isReady) {
+    return cloudCache.items.map(rowToLocalShape);
+  }
+  return unitItems(); // your existing local function
+}
+
 
   // ----------------------------
   // Supabase storage + DB helpers
@@ -301,19 +343,28 @@
   }
 
   async function cloudFetchLibraryItems(unit) {
-    const user = await requireAuth();
-    if (!user) return [];
+  const user = await requireAuth();
+  if (!user) return [];
 
-    const q = supabase
-      .from("library_items")
-      .select("*")
-      .eq("user_id", user.id)
-      .order("created_at", { ascending: false });
+  const q = supabase
+    .from("library_items")
+    .select("*")
+    .eq("user_id", user.id)
+    .order("created_at", { ascending: false });
 
-    const { data, error } = unit ? await q.eq("unit", unit) : await q;
-    if (error) throw error;
-    return data || [];
-  }
+  // IMPORTANT: this assumes your table column is named `unit`
+  const { data, error } = unit ? await q.eq("unit", unit) : await q;
+
+  if (error) throw error;
+
+  const rows = data || [];
+  cloudCache.items = rows;
+  cloudCache.byId = new Map(rows.map(r => [r.id, r]));
+  cloudCache.isReady = true;
+
+  return rows;
+}
+
 
   async function cloudDeleteLibraryItem(id, storagePath) {
     const user = await requireAuth();
@@ -696,15 +747,27 @@
   }
 
   function openLibraryItem(id) {
-    const it = items.find((x) => x.id === id);
-    if (!it) return;
-    openItemId = id;
-    $('#open-item-title').textContent = it.title;
-    $('#open-item-meta').textContent = `${it.type.toUpperCase()} • ${it.tags.join(', ') || 'No tags'} • ${new Date(it.created).toLocaleString()}`;
-    $('#doc-body').textContent = it.content || '';
-    $('#summary').textContent = '—';
-    $('#concepts').innerHTML = '';
+  // 1) Try local
+  let it = items.find((x) => x.id === id);
+
+  // 2) If not found, try cloud cache
+  if (!it && cloudCache.byId?.has(id)) {
+    it = rowToLocalShape(cloudCache.byId.get(id));
   }
+
+  if (!it) return;
+
+  openItemId = it.id;
+  $('#open-item-title').textContent = it.title;
+  $('#open-item-meta').textContent =
+    `${(it.type || 'note').toUpperCase()} • ${(it.tags || []).join(', ') || 'No tags'} • ${new Date(it.created).toLocaleString()}`;
+
+  // IMPORTANT: use content not content_text here; we normalized it
+  $('#doc-body').textContent = it.content || '';
+  $('#summary').textContent = '—';
+  $('#concepts').innerHTML = '';
+}
+
 
   function renderLibrary() {
     const list = $('#library-list');
@@ -749,8 +812,15 @@
     if (!openItemId && filtered[0]) openLibraryItem(filtered[0].id);
   }
 
-  $('#filter-type')?.addEventListener('change', renderLibrary);
-  $('#filter-tag')?.addEventListener('change', renderLibrary);
+async function rerenderLibrarySmart() {
+  const logged = await isLoggedIn();
+  if (logged) return cloudLoadAll();
+  return renderLibrary();
+}
+
+$('#filter-type')?.addEventListener('change', rerenderLibrarySmart);
+$('#filter-tag')?.addEventListener('change', rerenderLibrarySmart);
+
 
   // Edit toggle
   $('#toggle-edit')?.addEventListener('click', () => {
@@ -2187,4 +2257,10 @@ window.addEventListener("load", async () => {
     return;
   }
   if (typeof cloudLoadAll === "function") await cloudLoadAll();
-});();
+  window.addEventListener("load", async () => {
+  const user = await requireAuth();
+  if (!user) return;
+  await cloudLoadAll();
+});
+
+})(); // <-- FINAL line (only once)
