@@ -32,12 +32,19 @@
           <div class="sub">Units • Library • Revise • Flashcards • Tests</div>
         </div>
       </div>
-
+      
       <div class="top-actions">
         <div class="search">
           <input id="global-search" placeholder="Search across your library… (notes, cases, lectures)">
           <div id="search-results" class="search-results" style="display:none"></div>
         </div>
+        <div class="row gap" id="auth-box">
+  <input id="auth-email" placeholder="Email for login link" style="max-width:240px">
+  <button id="auth-send" class="secondary">Send login link</button>
+  <button id="auth-logout" class="ghost" style="display:none">Logout</button>
+</div>
+<div id="auth-status" class="muted small" style="margin-left:10px"></div>
+
         <button id="theme-toggle" class="ghost">Theme</button>
       </div>
     </header>
