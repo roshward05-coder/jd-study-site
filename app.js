@@ -12,6 +12,51 @@
   // issues: {id, unitId, text, done, created}
   // mastery: {unitId, tag -> 0..100}
   // streak: {lastDayISO, count}
+// ========= Supabase (PRIVATE MODE) =========
+const SUPABASE_URL = "https://YOURPROJECT.supabase.co";
+const SUPABASE_ANON_KEY = "YOUR_ANON_KEY";
+const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+// Auth UI elements
+const authEmail = document.getElementById("auth-email");
+const authSend = document.getElementById("auth-send");
+const authLogout = document.getElementById("auth-logout");
+const authStatus = document.getElementById("auth-status");
+
+// Require login for app
+async function requireAuth() {
+  const { data } = await supabase.auth.getSession();
+  const session = data.session;
+  if (!session) {
+    authStatus.textContent = "Please log in to use your private library.";
+    authLogout.style.display = "none";
+    return null;
+  }
+  authStatus.textContent = `Logged in: ${session.user.email}`;
+  authLogout.style.display = "inline-flex";
+  return session.user;
+}
+
+authSend?.addEventListener("click", async () => {
+  const email = (authEmail.value || "").trim();
+  if (!email) return alert("Enter your email.");
+  const { error } = await supabase.auth.signInWithOtp({ email });
+  if (error) return alert(error.message);
+  alert("Login link sent! Check your email.");
+});
+
+authLogout?.addEventListener("click", async () => {
+  await supabase.auth.signOut();
+  location.reload();
+});
+
+// Update UI when auth changes
+supabase.auth.onAuthStateChange(() => {
+  requireAuth().then(() => {
+    // After login, reload your library/unit stats from cloud
+    if (typeof cloudLoadAll === "function") cloudLoadAll();
+  });
+});
 
   const KEY = {
     V: 'jdh_v',
@@ -63,6 +108,76 @@
       .filter(Boolean)
       .slice(0, 20);
   }
+function safeFilename(name) {
+  return name.replace(/[^\w.\-]+/g, "_");
+}
+
+async function cloudUploadPdf(file) {
+  const user = await requireAuth();
+  if (!user) throw new Error("Not logged in.");
+
+  const path = `${user.id}/${Date.now()}_${safeFilename(file.name)}`;
+
+  const { error } = await supabase
+    .storage
+    .from("library")
+    .upload(path, file, { contentType: "application/pdf", upsert: false });
+
+  if (error) throw error;
+  return path;
+}
+
+async function cloudSignedUrl(storagePath) {
+  const { data, error } = await supabase
+    .storage
+    .from("library")
+    .createSignedUrl(storagePath, 60 * 30); // 30 minutes
+
+  if (error) throw error;
+  return data.signedUrl;
+}
+
+async function cloudInsertLibraryItem(item) {
+  const user = await requireAuth();
+  if (!user) throw new Error("Not logged in.");
+
+  const payload = { ...item, user_id: user.id };
+  const { error } = await supabase.from("library_items").insert(payload);
+  if (error) throw error;
+}
+
+async function cloudFetchLibraryItems(unit) {
+  const user = await requireAuth();
+  if (!user) return [];
+
+  const q = supabase
+    .from("library_items")
+    .select("*")
+    .eq("user_id", user.id)
+    .order("created_at", { ascending: false });
+
+  const { data, error } = unit ? await q.eq("unit", unit) : await q;
+  if (error) throw error;
+  return data || [];
+}
+
+async function cloudDeleteLibraryItem(id, storagePath) {
+  const user = await requireAuth();
+  if (!user) throw new Error("Not logged in.");
+
+  const { error: dbErr } = await supabase
+    .from("library_items")
+    .delete()
+    .eq("id", id)
+    .eq("user_id", user.id);
+
+  if (dbErr) throw dbErr;
+
+  if (storagePath) {
+    const { error: stErr } = await supabase.storage.from("library").remove([storagePath]);
+    if (stErr) console.warn("Storage delete failed:", stErr.message);
+  }
+}
 
   // ----------------------------
   // Migration from older demo
