@@ -1,6 +1,11 @@
 (() => {
   'use strict';
 
+  // Configure PDF.js worker
+  if (typeof pdfjsLib !== 'undefined') {
+    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.14.305/pdf.worker.min.js';
+  }
+
   // ----------------------------
   // Data model (client-side MVP)
   // ----------------------------
@@ -310,7 +315,7 @@
     }
   }
 
-  function addItem({ title, type, tags, content }) {
+  function addItem({ title, type, tags, content, pdfData }) {
     const it = {
       id: uid(),
       unitId: activeUnitId,
@@ -318,6 +323,7 @@
       type: type || 'note',
       tags: Array.isArray(tags) ? tags : [],
       content: content || '',
+      pdfData: pdfData || null, // Store PDF as base64
       created: now(),
       pinned: false
     };
@@ -344,19 +350,93 @@
     const tags = normaliseTags($('#item-tags')?.value || '');
     for (const f of files) {
       const isPDF = f.type === 'application/pdf' || f.name.toLowerCase().endsWith('.pdf');
-      const content = isPDF ? await extractTextFromPDF(f) : await f.text();
-      addItem({ title: f.name, type, tags, content });
+      if (isPDF) {
+        // Store PDF as base64
+        const reader = new FileReader();
+        reader.onload = async (evt) => {
+          const pdfData = evt.target.result; // base64 string
+          const content = await extractTextFromPDF(f);
+          const it = addItem({ title: f.name, type, tags, content, pdfData });
+          openLibraryItem(it.id);
+          renderLibrary();
+          renderTags();
+          renderStats();
+          renderUnitCards();
+        };
+        reader.readAsDataURL(f);
+      } else {
+        const content = await f.text();
+        addItem({ title: f.name, type, tags, content });
+      }
     }
     e.target.value = '';
-    renderLibrary();
-    renderTags();
-    renderStats();
-    renderUnitCards();
+    if (files.length && !files[0].type.includes('pdf')) {
+      renderLibrary();
+      renderTags();
+      renderStats();
+      renderUnitCards();
+    }
   });
 
   // ----------------------------
   // Library: list / open / edit
   // ----------------------------
+  
+  // PDF Viewer
+  let currentPDFPages = [];
+  let currentPDFPage = 1;
+  
+  async function renderPDFViewer(pdfData) {
+    const container = $('#pdf-viewer-container');
+    if (!container) return;
+    
+    try {
+      // Load PDF
+      const loadingTask = pdfjsLib.getDocument(pdfData);
+      const pdf = await loadingTask.promise;
+      currentPDFPages = [];
+      
+      // Render all pages
+      container.innerHTML = '<div class="pdf-pages"></div>';
+      const pagesContainer = container.querySelector('.pdf-pages');
+      
+      for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
+        const page = await pdf.getPage(pageNum);
+        currentPDFPages.push(page);
+        
+        // Create canvas for this page
+        const canvas = document.createElement('canvas');
+        canvas.className = 'pdf-page-canvas';
+        const context = canvas.getContext('2d');
+        
+        // Calculate scale to fit container
+        const viewport = page.getViewport({ scale: 1.5 });
+        canvas.height = viewport.height;
+        canvas.width = viewport.width;
+        
+        // Render page
+        await page.render({
+          canvasContext: context,
+          viewport: viewport
+        }).promise;
+        
+        // Add page number
+        const pageWrapper = document.createElement('div');
+        pageWrapper.className = 'pdf-page-wrapper';
+        const pageLabel = document.createElement('div');
+        pageLabel.className = 'pdf-page-label';
+        pageLabel.textContent = `Page ${pageNum}`;
+        pageWrapper.appendChild(canvas);
+        pageWrapper.appendChild(pageLabel);
+        pagesContainer.appendChild(pageWrapper);
+      }
+      
+      $('#pdf-page-info').textContent = `${pdf.numPages} pages`;
+    } catch (error) {
+      container.innerHTML = `<div class="muted">Error loading PDF: ${error.message}</div>`;
+    }
+  }
+  
   function unitItems() {
     return items.filter((it) => it.unitId === activeUnitId);
   }
@@ -367,7 +447,22 @@
     openItemId = id;
     $('#open-item-title').textContent = it.title;
     $('#open-item-meta').textContent = `${it.type.toUpperCase()} • ${it.tags.join(', ') || 'No tags'} • ${new Date(it.created).toLocaleString()}`;
-    $('#doc-body').textContent = it.content || '';
+    
+    // Check if this item has PDF data
+    if (it.pdfData) {
+      // Show PDF viewer
+      renderPDFViewer(it.pdfData);
+      $('#extract-text-btn').style.display = 'inline-block';
+      $('#doc-body').style.display = 'none';
+      $('#pdf-viewer-container').style.display = 'block';
+    } else {
+      // Show text content
+      $('#doc-body').textContent = it.content || '';
+      $('#doc-body').style.display = 'block';
+      $('#pdf-viewer-container').style.display = 'none';
+      $('#extract-text-btn').style.display = 'none';
+    }
+    
     $('#summary').textContent = '—';
     $('#concepts').innerHTML = '';
   }
@@ -495,6 +590,31 @@
     save(KEY.ITEMS, items);
     renderLibrary();
     renderPackList();
+  });
+
+  // Extract text from PDF view
+  $('#extract-text-btn')?.addEventListener('click', () => {
+    if (!openItemId) return;
+    const it = items.find((x) => x.id === openItemId);
+    if (!it || !it.pdfData) return;
+    
+    // Toggle between PDF view and text view
+    const pdfContainer = $('#pdf-viewer-container');
+    const docBody = $('#doc-body');
+    const btn = $('#extract-text-btn');
+    
+    if (pdfContainer.style.display === 'none') {
+      // Show PDF view
+      pdfContainer.style.display = 'block';
+      docBody.style.display = 'none';
+      btn.textContent = 'Extract as Text';
+    } else {
+      // Show text view
+      pdfContainer.style.display = 'none';
+      docBody.style.display = 'block';
+      docBody.textContent = it.content || '';
+      btn.textContent = 'View PDF';
+    }
   });
 
   // ----------------------------
