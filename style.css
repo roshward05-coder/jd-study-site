@@ -367,3 +367,15 @@ mark.mark{
 @media (max-width: 560px){
   .month{width:100%}
 }
+/* Enforce consistent view framing */
+.main > section:not(.view) {
+  padding: 14px;
+}
+
+.view {
+  background: rgba(255,255,255,0.02);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px;
+  box-shadow: var(--shadow);
+}
