@@ -213,6 +213,29 @@ button.danger:hover{background: rgba(255,77,109,0.18)}
   box-shadow: var(--shadow);
   color: #0b1220;
 }
+/* =========================================
+   Layout contract — pages cannot drift
+   ========================================= */
+
+/* All routed views MUST be .view */
+.main > section {
+  display: none; /* hidden by router */
+}
+
+.main > section.view {
+  display: block;
+}
+
+/* Prevent accidental nesting */
+.view > section {
+  all: unset;
+}
+
+/* Ensure grids never escape */
+.view > .grid {
+  width: 100%;
+}
+
 .view-head{margin-bottom:10px}
 .view-head h2{margin:0 0 6px}
 .muted{color:var(--muted)}
