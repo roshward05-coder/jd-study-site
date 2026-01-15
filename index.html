@@ -9,9 +9,9 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
   <script defer src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.14.305/pdf.min.js"></script>
+  <script defer src="app.js"></script>
   <script defer src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.14.305/pdf.worker.min.js"></script>
 
-  <script defer src="app.js"></script>
 </head>
 
 <body class="theme-light">
@@ -222,44 +222,6 @@
 </div>
 
               <div id="doc-body" class="doc-body" contenteditable="false"></div>
-              <!-- PDF Book Viewer -->
-<div id="pdf-view" class="pdf-view" style="display:none; margin-top:12px;">
-  <div class="row between" style="align-items:center; gap:10px; margin-bottom:10px;">
-    <div class="row gap" style="align-items:center;">
-      <button id="pdf-prev" class="ghost">◀ Prev</button>
-      <button id="pdf-next" class="ghost">Next ▶</button>
-      <span id="pdf-page-indicator" class="muted small" style="margin-left:8px;">—</span>
-    </div>
-
-    <div class="row gap" style="align-items:center;">
-      <span class="muted small" id="pdf-zoom-label">110%</span>
-      <input id="pdf-zoom" type="range" min="80" max="200" value="110">
-      <button id="pdf-open-new" class="secondary">Open PDF</button>
-    </div>
-  </div>
-
-  <div class="pdf-book">
-    <canvas id="pdf-canvas-left"></canvas>
-    <canvas id="pdf-canvas-right"></canvas>
-  </div>
-</div>
-
-
-              <div class="divider"></div>
-
-              <div class="grid two">
-                <div>
-                  <h4>Summary</h4>
-                  <div id="summary" class="panel muted">—</div>
-                </div>
-                <div>
-                  <h4>Key concepts</h4>
-                  <div class="row gap wrap">
-                    <button id="extract-concepts" class="secondary">Extract</button>
-                    <button id="add-concepts-as-cards" class="secondary">→ Flashcards</button>
-                  </div>
-                  <div id="concepts" class="chips"></div>
-                </div>
               </div>
 
               <div class="divider"></div>
