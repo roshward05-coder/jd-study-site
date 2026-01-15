@@ -12,6 +12,9 @@
   --danger:#ff4d6d;
   --shadow: 0 16px 40px rgba(0,0,0,0.35);
   --radius: 14px;
+  --surface: rgba(255,255,255,0.88);
+  --surface2: rgba(255,255,255,0.72);
+  --textOnSurface: #0b1220; /* for light surfaces */
 }
 
 *{box-sizing:border-box}
@@ -40,17 +43,29 @@ body.theme-light{
   --muted:#4b5563;
   --border:rgba(2,6,23,0.10);
   --shadow: 0 12px 28px rgba(2,6,23,0.10);
+  --surface: rgba(255,255,255,0.92);
+  --surface2: rgba(255,255,255,0.78);
+  --textOnSurface: #0b1220;
   background:
     url("floral-pattern.jpg") repeat,
     linear-gradient(rgba(255,255,255,0.92), rgba(255,255,255,0.92));
   background-size: 600px 600px, auto;
   background-attachment: fixed;
 }
+/* Use tokens instead of repeating rgba() + hard-coded text */
+.sidebar,
+.view,
+.panel,
+.search input,
+#theme-toggle.ghost{
+  background: var(--surface);
+  color: var(--textOnSurface);
+}
 
 a{color:inherit}
 code{font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace}
 
-#app{min-height:100%; display:flex; flex-direction:column}'
+#app{min-height:100%; display:flex; flex-direction:column} /* remove trailing apostrophe */
 
 #auth-status { white-space: nowrap; }
 #auth-box input { background:rgba(255,255,255,0.88); color:#0b1220; }
