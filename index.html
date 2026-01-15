@@ -6,8 +6,8 @@
   <title>JD Study Hub — Units • Library • Flashcards • Tests</title>
   <link rel="stylesheet" href="style.css">
   <script defer src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script defer src="app.js"></script>
   <script defer src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.14.305/pdf.min.js"></script>
+  <script defer src="app.js"></script>
 </head>
 <body class="theme-light">
   <div id="app">
@@ -39,6 +39,8 @@
           <input id="global-search" placeholder="Search across your library… (notes, cases, lectures)">
           <div id="search-results" class="search-results" style="display:none"></div>
         </div>
+
+        <button id="auth-btn" class="btn ghost" type="button" title="Login to upload">Login</button>
 </div>
     </header>
 
@@ -170,6 +172,7 @@
                 </div>
                 <div class="row gap">
                   <button id="extract-text-btn" class="secondary" style="display:none">Extract as Text</button>
+                  <button id="copy-public-link" class="secondary" style="display:none">Copy Public Link</button>
                   <button id="toggle-edit" class="ghost">Edit</button>
                   <button id="highlight-btn" class="ghost">Highlight</button>
                   <button id="summarize-btn">Summarise</button>
@@ -647,8 +650,69 @@
     </div>
 
     <footer class="footer">
-      <small></small>
+      <small>Local-first study hub • PDFs can be stored online via Supabase Storage.</small>
+      <button id="sb-open" class="btn ghost small" type="button" title="Supabase settings">Supabase</button>
     </footer>
+
+    <!-- Supabase Settings Modal -->
+    <div id="sb-modal" class="modal" style="display:none" aria-hidden="true">
+      <div class="modal-card panel">
+        <div class="row space">
+          <h3 style="margin:0">Supabase Settings</h3>
+          <button id="sb-close" class="btn ghost small" type="button">Close</button>
+        </div>
+        <p class="muted" style="margin-top:8px">
+          Paste your Supabase <strong>Project URL</strong> and <strong>anon public key</strong> (Project Settings → API).
+          Bucket should match your Storage bucket (recommended: <code>library</code>).
+        </p>
+        <div class="grid2" style="margin-top:12px">
+          <div>
+            <label class="label">Project URL</label>
+            <input id="sb-url" placeholder="https://xxxx.supabase.co">
+          </div>
+          <div>
+            <label class="label">Bucket</label>
+            <input id="sb-bucket" placeholder="library">
+          </div>
+        </div>
+        <div style="margin-top:12px">
+          <label class="label">Anon public key</label>
+          <textarea id="sb-key" rows="3" placeholder="eyJhbGciOi..."></textarea>
+        </div>
+        <div class="row gap" style="margin-top:12px; align-items:center">
+          <button id="sb-save" class="btn primary" type="button">Save</button>
+          <button id="sb-clear" class="btn danger" type="button">Clear</button>
+          <span id="sb-status" class="muted small"></span>
+        </div>
+      </div>
+    </div>
   </div>
+
+    <!-- Auth Modal (Login required for uploads; PDFs remain public) -->
+    <div id="auth-modal" class="modal" style="display:none" role="dialog" aria-modal="true" aria-labelledby="auth-title">
+      <div class="modal-card">
+        <div class="modal-head">
+          <h3 id="auth-title">Login</h3>
+          <button id="auth-close" class="btn ghost small" type="button">Close</button>
+        </div>
+        <div class="modal-body">
+          <div class="muted small" style="margin-bottom:10px">
+            Login is required to upload. Once uploaded, PDFs are public and can be viewed on any device via the public link.
+          </div>
+
+          <label class="lbl">Email</label>
+          <input id="auth-email" type="email" placeholder="you@example.com" autocomplete="email">
+
+          <div class="row gap" style="margin-top:12px">
+            <button id="auth-send-link" class="btn primary" type="button">Send magic link</button>
+            <button id="auth-signout" class="btn secondary" type="button" style="display:none">Sign out</button>
+          </div>
+
+          <div id="auth-status" class="muted small" style="margin-top:10px"></div>
+        </div>
+      </div>
+    </div>
+
+  <div id="toast" class="toast" style="display:none"></div>
 </body>
 </html>
