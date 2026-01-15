@@ -5,16 +5,10 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>JD Study Hub — Units • Library • Flashcards • Tests</title>
   <link rel="stylesheet" href="style.css">
-
-  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-
-  <script defer src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.14.305/pdf.min.js"></script>
   <script defer src="app.js"></script>
-  <script defer src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.14.305/pdf.worker.min.js"></script>
-
+  <script defer src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.14.305/pdf.min.js"></script>
 </head>
-
-<body>
+<body class="theme-light">
   <div id="app">
     <header class="topbar">
       <div class="brand">
@@ -38,19 +32,14 @@
           <div class="sub">Units • Library • Revise • Flashcards • Tests</div>
         </div>
       </div>
-      
+
       <div class="top-actions">
         <div class="search">
           <input id="global-search" placeholder="Search across your library… (notes, cases, lectures)">
           <div id="search-results" class="search-results" style="display:none"></div>
         </div>
-        <div class="row gap" id="auth-box">
-  <input id="auth-email" placeholder="Email for login link" style="max-width:240px">
-  <button id="auth-send" class="secondary">Send login link</button>
-  <button id="auth-logout" class="ghost" style="display:none">Logout</button>
-</div>
-<div id="auth-status" class="muted small" style="margin-left:10px"></div>
-</div>
+        <button id="theme-toggle" class="ghost">Theme</button>
+      </div>
     </header>
 
     <div class="layout">
@@ -116,7 +105,7 @@
                 <button id="qa-generate-test" class="secondary">Generate Test from Selected</button>
               </div>
               <div class="divider"></div>
-              <h4>Study ritual</h4>
+              <h4>Study ritual (Khan‑style)</h4>
               <ol class="small">
                 <li>Pick a unit → skim your lecture summary.</li>
                 <li>Do 10 flashcards (spaced repetition).</li>
@@ -186,40 +175,23 @@
                 </div>
               </div>
 
-              <!-- PDF Book Viewer -->
-<div id="pdf-view" style="display:none; margin-top:10px;">
-  <div class="row between pdf-controls">
-    <div class="row gap wrap">
-      <button id="pdf-prev" class="ghost">◀ Prev</button>
-      <div id="pdf-page-indicator" class="badge">—</div>
-      <button id="pdf-next" class="ghost">Next ▶</button>
-    </div>
-
-    <div class="row gap wrap pdf-zoom">
-      <span class="muted small">Zoom</span>
-      <input id="pdf-zoom" type="range" min="70" max="180" value="110">
-      <span id="pdf-zoom-label" class="badge">110%</span>
-      <button id="pdf-open-new" class="secondary">Open in new tab</button>
-    </div>
-  </div>
-
-  <div class="pdf-spread" style="margin-top:10px;">
-    <div class="pdf-page">
-      <canvas id="pdf-canvas-left"></canvas>
-    </div>
-    <div class="pdf-page">
-      <canvas id="pdf-canvas-right"></canvas>
-    </div>
-  </div>
-
-  <div class="muted small" style="margin-top:8px">
-    Tip: This shows a two-page “book spread”. If the PDF has an odd number of pages, the last right page will be blank.
-  </div>
-
-  <div class="divider"></div>
-</div>
-
               <div id="doc-body" class="doc-body" contenteditable="false"></div>
+
+              <div class="divider"></div>
+
+              <div class="grid two">
+                <div>
+                  <h4>Summary</h4>
+                  <div id="summary" class="panel muted">—</div>
+                </div>
+                <div>
+                  <h4>Key concepts</h4>
+                  <div class="row gap wrap">
+                    <button id="extract-concepts" class="secondary">Extract</button>
+                    <button id="add-concepts-as-cards" class="secondary">→ Flashcards</button>
+                  </div>
+                  <div id="concepts" class="chips"></div>
+                </div>
               </div>
 
               <div class="divider"></div>
@@ -237,7 +209,7 @@
         <section id="view-learn" class="view" style="display:none">
           <div class="view-head">
             <h2>Learn</h2>
-            <div class="muted">A skills test: topics (tags) become skills, and your quizzes raise mastery.</div>
+            <div class="muted">A Khan‑style “skills” view: topics (tags) become skills, and your quizzes raise mastery.</div>
           </div>
 
           <div class="grid two">
@@ -418,7 +390,7 @@
                     <option value="(Cth)">(Cth)</option>
                     <option value="(WA)">(WA)</option>
                     <option value="(NSW)">(NSW)</option>
-                    <option value="(VIC)">(VIC)</option>
+                    <option value="(V...">(VIC)</option>
                     <option value="(Qld)">(Qld)</option>
                     <option value="(SA)">(SA)</option>
                     <option value="(Tas)">(Tas)</option>
@@ -673,7 +645,7 @@
     </div>
 
     <footer class="footer">
-      <small></small>
+      <small>Local demo — data saved in your browser. Serve with a local web server for PDF uploads (e.g., <code>python -m http.server 8000</code>).</small>
     </footer>
   </div>
 </body>
