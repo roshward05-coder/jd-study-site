@@ -118,14 +118,29 @@ code{font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Libera
 
 .unit-switcher{margin-top:14px; padding-top:14px; border-top:1px solid var(--border)}
 .label{display:block; font-size:12px; color:var(--muted); margin:0 0 6px}
+/* One rule: form controls inherit the correct surface text color */
 select,input,textarea{
   width:100%;
   padding:10px 10px;
   border-radius:12px;
   border:1px solid var(--border);
-  background: rgba(255,255,255,0.02);
-  color:var(--text);
+  background: var(--surface2);
+  color: inherit;              /* <-- key */
   outline:none;
+}
+
+/* Placeholder also inherits theme */
+input::placeholder,
+textarea::placeholder{
+  color: color-mix(in srgb, currentColor 45%, transparent);
+}
+
+/* Accessible focus: consistent across the whole site */
+:where(button, a, input, select, textarea):focus-visible{
+  outline: 2px solid color-mix(in srgb, var(--accent) 70%, transparent);
+  outline-offset: 2px;
+}
+
 }
 input::placeholder{color: rgba(159,176,198,0.7)}
 .row{display:flex; align-items:center}
