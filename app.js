@@ -7,21 +7,166 @@
   // 2) Create a Storage bucket named "pdfs" (public)
   // 3) Paste your Project URL + anon key below
   // ----------------------------
-  const SUPABASE_URL = "https://ujwayetqmcvbqlckvjks.supabase.co";
-  const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVqd2F5ZXRxbWN2YnFsY2t2amtzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjgzNzM4NDksImV4cCI6MjA4Mzk0OTg0OX0.1v1MB3AgnmnmEY37C2p9KrwhCsMiG0yLV30-1jz4rP8";
-  const PDF_BUCKET = "pdfs";
+  // ----------------------------
+// Supabase (public PDF storage)
+// - Put your Project URL + anon public key in the modal (Supabase button) OR paste below.
+// - Storage bucket name: "library" (recommended) or your bucket name.
+// ----------------------------
+const DEFAULT_SUPABASE_URL = "https://ujwayetqmcvbqlckvjks.supabase.co";
+const DEFAULT_SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVqd2F5ZXRxbWN2YnFsY2t2amtzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjgzNzM4NDksImV4cCI6MjA4Mzk0OTg0OX0.1v1MB3AgnmnmEY37C2p9KrwhCsMiG0yLV30-1jz4rP8";
+const DEFAULT_PDF_BUCKET = "library";
 
-  function supabaseReady() {
-    return (
-      typeof window.supabase !== "undefined" &&
-      SUPABASE_URL &&
-      SUPABASE_ANON_KEY &&
-      !SUPABASE_URL.includes("https://ujwayetqmcvbqlckvjks.supabase.co") &&
-      !SUPABASE_ANON_KEY.includes("eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVqd2F5ZXRxbWN2YnFsY2t2amtzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjgzNzM4NDksImV4cCI6MjA4Mzk0OTg0OX0.1v1MB3AgnmnmEY37C2p9KrwhCsMiG0yLV30-1jz4rP8")
-    );
+function getSbConfig() {
+  try {
+    const url = (localStorage.getItem("SB_URL") || DEFAULT_SUPABASE_URL).trim();
+    const key = (localStorage.getItem("SB_KEY") || DEFAULT_SUPABASE_ANON_KEY).trim();
+    const bucket = (localStorage.getItem("library") || DEFAULT_PDF_BUCKET).trim() || DEFAULT_PDF_BUCKET;
+    return { url, key, bucket };
+  } catch {
+    return { url: DEFAULT_SUPABASE_URL, key: DEFAULT_SUPABASE_ANON_KEY, bucket: DEFAULT_PDF_BUCKET };
+  }
+}
+
+function supabaseReady() {
+  const { url, key } = getSbConfig();
+  return (
+    typeof window.supabase !== "undefined" &&
+    url &&
+    key &&
+    !key.includes("...") &&
+    url.startsWith("https://") &&
+    url.includes(".supabase.co")
+  );
+}
+
+const sb = supabaseReady() ? window.supabase.createClient(getSbConfig().url, getSbConfig().key) : null;
+const PDF_BUCKET = getSbConfig().bucket;
+
+  // ----------------------------
+  // Auth (required for uploads)
+  // ----------------------------
+  async function getSessionUser() {
+    if (!sb || !sb.auth) return null;
+    const { data, error } = await sb.auth.getSession();
+    if (error) return null;
+    return data?.session?.user || null;
   }
 
-  const sb = supabaseReady() ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY) : null;
+  async function ensureLoggedInForUpload() {
+    if (!sb || !sb.auth) return false;
+    const user = await getSessionUser();
+    if (user) return true;
+    openAuthModal();
+    return false;
+  }
+
+  async function signInMagicLink(email) {
+    if (!sb || !sb.auth) throw new Error("Supabase not configured.");
+    const redirectTo = (window.location && window.location.origin && window.location.origin !== "null")
+      ? window.location.origin
+      : null;
+
+    const { error } = await sb.auth.signInWithOtp({
+      email,
+      options: redirectTo ? { emailRedirectTo: redirectTo } : {}
+    });
+    if (error) throw error;
+  }
+
+  async function signOut() {
+    if (!sb || !sb.auth) return;
+    await sb.auth.signOut();
+  }
+
+  // UI hooks
+  function openAuthModal() {
+    const m = document.getElementById('auth-modal');
+    if (!m) return;
+    m.style.display = 'flex';
+    const email = document.getElementById('auth-email');
+    if (email) email.focus();
+  }
+  function closeAuthModal() {
+    const m = document.getElementById('auth-modal');
+    if (!m) return;
+    m.style.display = 'none';
+  }
+
+  async function refreshAuthUI() {
+    const btn = document.getElementById('auth-btn');
+    const signOutBtn = document.getElementById('auth-signout');
+    const status = document.getElementById('auth-status');
+    const fileInput = document.getElementById('file-input');
+
+    if (!btn) return;
+
+    if (!sb || !sb.auth) {
+      btn.style.display = 'none';
+      if (fileInput) fileInput.disabled = true;
+      return;
+    }
+
+    btn.style.display = 'inline-flex';
+    const user = await getSessionUser();
+
+    if (user) {
+      btn.textContent = 'Logout';
+      btn.title = user.email || 'Logged in';
+      if (signOutBtn) signOutBtn.style.display = 'inline-flex';
+      if (status) status.textContent = `Logged in as ${user.email || 'user'}. Uploads enabled.`;
+      if (fileInput) fileInput.disabled = false;
+    } else {
+      btn.textContent = 'Login';
+      btn.title = 'Login to upload';
+      if (signOutBtn) signOutBtn.style.display = 'none';
+      if (status) status.textContent = 'Not logged in. Uploads are disabled.';
+      if (fileInput) fileInput.disabled = true;
+    }
+  }
+
+  async function cloudInsertLibraryItem({ unit, title, type, tags, storage_path, public_url, content_text }) {
+    const user = await getSessionUser();
+    if (!user) throw new Error("Not logged in.");
+    const payload = {
+      user_id: user.id,
+      unit,
+      title,
+      type,
+      tags: Array.isArray(tags) ? tags : [],
+      storage_path,
+      public_url,
+      content_text: content_text || ''
+    };
+    const { data, error } = await sb.from('library_items').insert([payload]).select('id').single();
+    if (error) throw error;
+    return data?.id || null;
+  }
+
+  async function cloudLoadLibraryItems() {
+    const user = await getSessionUser();
+    if (!user) return [];
+    const { data, error } = await sb.from('library_items').select('*').order('created_at', { ascending: false });
+    if (error) throw error;
+    return data || [];
+  }
+
+  function mapRowToItem(row) {
+    return {
+      id: row.id,
+      unitId: unitId || activeUnitId, // will be re-set by unit matching below
+      title: row.title || 'Untitled',
+      type: row.type || 'note',
+      tags: Array.isArray(row.tags) ? row.tags : [],
+      content: row.content_text || '',
+      pdfUrl: row.public_url || null,
+      storagePath: row.storage_path || null,
+      created: row.created_at ? new Date(row.created_at).toISOString() : now(),
+      pinned: false,
+      cloudId: row.id,
+      unit: row.unit || null
+    };
+  }
+
 
   async function uploadPdfToSupabase(file) {
     if (!sb) throw new Error("Supabase not configured.");
@@ -145,7 +290,7 @@
       if (oldUnits.length) {
         units = oldUnits.map((u) => ({ id: u.id || uid(), name: u.name, created: now() }));
       } else {
-        units = [{ id: uid(), name: 'My Unit', created: now() }];
+        units = [{ id: id || uid(), name: 'My Unit', created: now() }];
       }
 
       const fallbackUnit = units[0].id;
@@ -353,7 +498,7 @@
     }
   }
 
-  function addItem({ title, type, tags, content, pdfUrl, storagePath }) {
+  function addItem({ id, unitId, title, type, tags, content, pdfUrl, storagePath, cloudId, unit }) {
     const it = {
       id: uid(),
       unitId: activeUnitId,
@@ -362,7 +507,9 @@
       tags: Array.isArray(tags) ? tags : [],
       content: content || '',
       pdfUrl: pdfUrl || null,
-      storagePath: storagePath || null, // Store PDF as base64
+      storagePath: storagePath || null,
+      cloudId: cloudId || null,
+      unit: unit || null,
       created: now(),
       pinned: false
     };
@@ -396,8 +543,27 @@
           const content = await extractTextFromPDF(f);
 
           if (sb) {
+            const ok = await ensureLoggedInForUpload();
+            if (!ok) { 
+              // keep file input selected but stop
+              continue;
+            }
             const { storagePath, publicUrl } = await uploadPdfToSupabase(f);
-            const it = addItem({ title: f.name, type, tags, content, pdfUrl: publicUrl, storagePath });
+            let cloudId = null;
+            try{
+              cloudId = await cloudInsertLibraryItem({
+                unit: (units.find(u=>u.id===activeUnitId)?.name) || 'General',
+                title: f.name,
+                type,
+                tags,
+                storage_path: storagePath,
+                public_url: publicUrl,
+                content_text: content
+              });
+            }catch(e){
+              console.warn('Could not save metadata to library_items:', e);
+            }
+            const it = addItem({ id: cloudId || null, title: f.name, type, tags, content, pdfUrl: publicUrl, storagePath, cloudId, unit: (units.find(u=>u.id===activeUnitId)?.name) || 'General' });
             openLibraryItem(it.id);
           } else {
             // Fallback: store as base64 locally (works offline, but not recommended for large PDFs)
@@ -421,7 +587,7 @@
           renderUnitCards();
         } catch (err) {
           console.error(err);
-          alert('PDF upload failed. Check Supabase settings and try again.');
+          alert('PDF upload failed. If you want online storage, open Supabase settings and paste your URL + anon key.');
         }
       } else {
         const content = await f.text();
@@ -512,6 +678,22 @@
       // Show PDF viewer
       renderPDFViewer(it.pdfUrl);
       $('#extract-text-btn').style.display = 'inline-block';
+      // Public sharing
+      const shareBtn = $('#copy-public-link');
+      if (shareBtn) {
+        shareBtn.style.display = (it.pdfUrl && /^https?:\/\//.test(it.pdfUrl)) ? 'inline-block' : 'none';
+        shareBtn.onclick = async () => {
+          const url = it.pdfUrl;
+          const origin = (window.location && window.location.origin && window.location.origin !== 'null') ? window.location.origin : '';
+          const deep = origin ? `${origin}${window.location.pathname || ''}?pdf=${encodeURIComponent(url)}` : url;
+          try {
+            await navigator.clipboard.writeText(deep);
+            toast('Public link copied.');
+          } catch(e) {
+            prompt('Copy this public link:', deep);
+          }
+        };
+      }
       $('#doc-body').style.display = 'none';
       $('#pdf-viewer-container').style.display = 'block';
     } else {
@@ -520,6 +702,8 @@
       $('#doc-body').style.display = 'block';
       $('#pdf-viewer-container').style.display = 'none';
       $('#extract-text-btn').style.display = 'none';
+      const shareBtn = $('#copy-public-link');
+      if (shareBtn) shareBtn.style.display = 'none';
     }
     
     $('#summary').textContent = '—';
@@ -2278,11 +2462,187 @@
     renderTestBuilderUI();
   }
 
-  // Init
+  
+  // Supabase settings modal (optional)
+  (function initSupabaseModal(){
+    const openBtn = $('#sb-open');
+    const modal = $('#sb-modal');
+    const closeBtn = $('#sb-close');
+    const saveBtn = $('#sb-save');
+    const clearBtn = $('#sb-clear');
+    const status = $('#sb-status');
+    const urlIn = $('#sb-url');
+    const keyIn = $('#sb-key');
+    const bucketIn = $('#sb-bucket');
+
+    function setStatus(msg){ if(status) status.textContent = msg || ''; }
+
+    function open(){
+      if(!modal) return;
+      const cfg = getSbConfig();
+      if(urlIn) urlIn.value = cfg.url || '';
+      if(keyIn) keyIn.value = cfg.key || '';
+      if(bucketIn) bucketIn.value = cfg.bucket || DEFAULT_PDF_BUCKET;
+      modal.style.display = 'flex';
+      modal.setAttribute('aria-hidden','false');
+      setStatus(supabaseReady() ? 'Configured.' : 'Not configured.');
+    }
+
+    function close(){
+      if(!modal) return;
+      modal.style.display = 'none';
+      modal.setAttribute('aria-hidden','true');
+      setStatus('');
+    }
+
+    openBtn?.addEventListener('click', open);
+    closeBtn?.addEventListener('click', close);
+    modal?.addEventListener('click', (e) => { if(e.target === modal) close(); });
+    document.addEventListener('keydown', (e) => { if(e.key === 'Escape') close(); });
+
+    saveBtn?.addEventListener('click', () => {
+      const url = (urlIn?.value || '').trim();
+      const key = (keyIn?.value || '').trim();
+      const bucket = (bucketIn?.value || DEFAULT_PDF_BUCKET).trim() || DEFAULT_PDF_BUCKET;
+
+      if(!url || !key){
+        setStatus('Please paste both URL and anon key.');
+        return;
+      }
+      if(!url.startsWith('https://') || !url.includes('.supabase.co')){
+        setStatus('URL should look like https://xxxx.supabase.co');
+        return;
+      }
+      localStorage.setItem('SB_URL', url);
+      localStorage.setItem('SB_KEY', key);
+      localStorage.setItem('SB_BUCKET', bucket);
+      setStatus('Saved. Refreshing…');
+      // reload to re-init sb client cleanly
+      setTimeout(() => location.reload(), 400);
+    });
+
+    clearBtn?.addEventListener('click', () => {
+      localStorage.removeItem('SB_URL');
+      localStorage.removeItem('SB_KEY');
+      localStorage.removeItem('SB_BUCKET');
+      setStatus('Cleared. Refreshing…');
+      setTimeout(() => location.reload(), 300);
+    });
+  })()
+
+  // Auth modal + gating (login required for uploads)
+  (function initAuthModal(){
+    const btn = $('#auth-btn');
+    const modal = $('#auth-modal');
+    const closeBtn = $('#auth-close');
+    const sendBtn = $('#auth-send-link');
+    const signOutBtn = $('#auth-signout');
+    const status = $('#auth-status');
+    const emailIn = $('#auth-email');
+
+    function setStatus(msg){ if(status) status.textContent = msg || ''; }
+
+    btn?.addEventListener('click', async () => {
+      if (!sb || !sb.auth) return;
+      const user = await getSessionUser();
+      if (user) {
+        await signOut();
+        setStatus('Signed out.');
+        await refreshAuthUI();
+        return;
+      }
+      openAuthModal();
+      await refreshAuthUI();
+    });
+
+    closeBtn?.addEventListener('click', closeAuthModal);
+    modal?.addEventListener('click', (e)=>{ if(e.target === modal) closeAuthModal(); });
+
+    sendBtn?.addEventListener('click', async () => {
+      try{
+        if (!sb) throw new Error('Supabase not configured.');
+        const email = (emailIn?.value || '').trim();
+        if (!email) { setStatus('Enter an email.'); return; }
+        setStatus('Sending magic link…');
+        await signInMagicLink(email);
+        setStatus('Magic link sent. Check your inbox and click the link to finish login.');
+      } catch(err){
+        console.error(err);
+        setStatus(err?.message || 'Login failed.');
+      }
+    });
+
+    signOutBtn?.addEventListener('click', async () => {
+      await signOut();
+      setStatus('Signed out.');
+      await refreshAuthUI();
+    });
+
+    // Watch auth changes
+    try{
+      sb?.auth?.onAuthStateChange(async () => {
+        await refreshAuthUI();
+        // When logged in, prefer cloud library
+        if (sb) {
+          try{
+            const user = await getSessionUser();
+            if (user) {
+              const rows = await cloudLoadLibraryItems();
+              // Map rows to items and merge units by name
+              const mapped = rows.map(mapRowToItem);
+              // resolve unitId by unit name
+              mapped.forEach(it=>{
+                if (it.unit) {
+                  const u = units.find(x=> (x.name||'').toLowerCase() === (it.unit||'').toLowerCase());
+                  if (u) it.unitId = u.id;
+                }
+              });
+              items = mapped;
+              save(KEY.ITEMS, items);
+              refreshAll();
+            }
+          }catch(e){ console.warn(e); }
+        }
+      });
+    }catch(e){ /* ignore */ }
+
+  })();
+;
+
+// Init
   ensureDefaultUnit();
   renderUnitSelect();
   refreshAll();
   initCitations();
-  show('units');
 
-})();
+  // Auth UI state (uploads require login; viewing is public)
+  refreshAuthUI();
+
+  // Deep-link public PDF viewing: ?pdf=<public_url>
+  try{
+    const params = new URLSearchParams(window.location.search || '');
+    const pdf = params.get('pdf');
+    if (pdf) {
+      // Create a temporary item and open it
+      const it = addItem({ title: 'Shared PDF', type: 'pdf', tags: [], content: '', pdfUrl: pdf, storagePath: null });
+      openLibraryItem(it.id);
+      show('library');
+    } else {
+      show('units');
+    }
+  }catch(e){
+    show('units');
+  }
+
+})()
+  // Small toast notification
+  function toast(msg, ms=2200){
+    const el = document.getElementById('toast');
+    if (!el) { alert(msg); return; }
+    el.textContent = msg || '';
+    el.classList.add('show');
+    clearTimeout(toast._t);
+    toast._t = setTimeout(()=>{ el.classList.remove('show'); }, ms);
+  }
+
+;
