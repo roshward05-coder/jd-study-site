@@ -236,30 +236,43 @@
         </section>
 
         <!-- LEARN -->
-        <section id="view-learn" class="view" style="display:none">
-          <div class="view-head">
-            <h2>Learn</h2>
-            <div class="muted">A skills test: topics (tags) become skills, and your quizzes raise mastery.</div>
-          </div>
+        <section id="view-learn" class="view">
+  <div class="view-head">
+    <h2>Learn</h2>
+    <p class="muted small">Practice by skill and track mastery</p>
+  </div>
 
-          <div class="grid two">
-            <div class="card">
-              <h3>Skills for this unit</h3>
-              <div id="skills" class="skills"></div>
-            </div>
+  <div class="divider"></div>
 
-            <div class="card">
-              <h3>Practice</h3>
-              <div class="row gap wrap">
-                <select id="practice-skill"><option value="">Choose a skill/topic</option></select>
-                <button id="start-skill-quiz">Start practice quiz</button>
-              </div>
-              <div class="muted small" style="margin-top:8px">Practice quizzes are generated from your tagged library items.</div>
-              <div class="divider"></div>
-              <div id="learn-session" class="panel">—</div>
-            </div>
-          </div>
-        </section>
+  <div class="grid two">
+    <!-- LEFT COLUMN -->
+    <div class="card">
+      <h3>Skills for this unit</h3>
+      <div id="skills" class="skills"></div>
+    </div>
+
+    <!-- RIGHT COLUMN -->
+    <div class="card">
+      <h3>Practice</h3>
+
+      <div class="row gap wrap">
+        <select id="practice-skill">
+          <option value="">Choose a skill/topic</option>
+        </select>
+        <button id="start-skill-quiz">Start practice quiz</button>
+      </div>
+
+      <div class="muted small" style="margin-top:8px">
+        Practice quizzes are generated from your tagged library items.
+      </div>
+
+      <div class="divider"></div>
+
+      <div id="learn-session" class="panel">—</div>
+    </div>
+  </div>
+</section>
+
 
         <!-- FLASHCARDS -->
         <section id="view-flashcards" class="view" style="display:none">
