@@ -188,6 +188,39 @@
                 </div>
               </div>
 
+              <!-- PDF Book Viewer -->
+<div id="pdf-view" style="display:none; margin-top:10px;">
+  <div class="row between pdf-controls">
+    <div class="row gap wrap">
+      <button id="pdf-prev" class="ghost">◀ Prev</button>
+      <div id="pdf-page-indicator" class="badge">—</div>
+      <button id="pdf-next" class="ghost">Next ▶</button>
+    </div>
+
+    <div class="row gap wrap pdf-zoom">
+      <span class="muted small">Zoom</span>
+      <input id="pdf-zoom" type="range" min="70" max="180" value="110">
+      <span id="pdf-zoom-label" class="badge">110%</span>
+      <button id="pdf-open-new" class="secondary">Open in new tab</button>
+    </div>
+  </div>
+
+  <div class="pdf-spread" style="margin-top:10px;">
+    <div class="pdf-page">
+      <canvas id="pdf-canvas-left"></canvas>
+    </div>
+    <div class="pdf-page">
+      <canvas id="pdf-canvas-right"></canvas>
+    </div>
+  </div>
+
+  <div class="muted small" style="margin-top:8px">
+    Tip: This shows a two-page “book spread”. If the PDF has an odd number of pages, the last right page will be blank.
+  </div>
+
+  <div class="divider"></div>
+</div>
+
               <div id="doc-body" class="doc-body" contenteditable="false"></div>
 
               <div class="divider"></div>
