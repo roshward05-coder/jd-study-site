@@ -166,6 +166,18 @@
         $('#open-item-title').textContent = first.title || 'Untitled';
         $('#open-item-meta').textContent = `${(first.type || '').toUpperCase()} • ${(first.tags || []).join(', ') || 'No tags'}`;
         $('#doc-body').textContent = first.content_text || '';
+        // If it has a PDF, open the book viewer too
+        if (first.storage_path) {
+          try {
+            const signedUrl = await cloudSignedUrl(first.storage_path);
+            await pdfOpenFromUrl(signedUrl);
+          } catch (err) {
+            console.error(err);
+            pdfShow(false);
+          }
+        } else {
+          pdfShow(false);
+        }
       }
     }
   }
@@ -357,37 +369,6 @@ document.getElementById("pdf-open-new")?.addEventListener("click", () => {
   await pdfOpenFromUrl(url);
 }
 
-  // If you already have a pdf.js viewer function, call it here.
-  // Minimal pattern: open in new tab OR feed into pdfjsLib.getDocument({ url })
-  // Example: window.open(url, "_blank");
-
-
-  // If your app uses pdf.js text extraction only (no visual rendering), do this:
-  if (!window.pdfjsLib) {
-    window.open(url, "_blank");
-    return;
-  }
-
-  // Example render (very minimal): load first page into a <canvas id="pdf-canvas">
-  const canvas = document.getElementById("pdf-canvas");
-  if (!canvas) {
-    // fallback: new tab
-    window.open(url, "_blank");
-    return;
-  }
-
-  const loadingTask = pdfjsLib.getDocument({ url });
-  const pdf = await loadingTask.promise;
-  const page = await pdf.getPage(1);
-  const viewport = page.getViewport({ scale: 1.2 });
-  const ctx = canvas.getContext("2d");
-  canvas.width = viewport.width;
-  canvas.height = viewport.height;
-
-  await page.render({ canvasContext: ctx, viewport }).promise;
-}
-
-  // ============================
 // Cloud-first mode glue
 // ============================
 let cloudCache = {
