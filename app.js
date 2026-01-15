@@ -248,21 +248,6 @@
     // If you have a toast UI, plug it in. Otherwise fall back:
     console.log(msg);
   }
-  async function openCloudPdfInViewer(item) {
-  // item is a row from Supabase library_items
-  if (!item?.storage_path) {
-    alert("This item has no PDF stored.");
-    return;
-  }
-
-  const user = await requireAuth();
-  if (!user) return;
-
-  const url = await cloudSignedUrl(item.storage_path);
-
-  // If you already have a pdf.js viewer function, call it here.
-  // Minimal pattern: open in new tab OR feed into pdfjsLib.getDocument({ url })
-  // Example: window.open(url, "_blank");
 // ----------------------------
 // PDF Book Viewer (pdf.js)
 // ----------------------------
@@ -319,38 +304,14 @@ async function pdfOpenFromUrl(url) {
     return;
   }
 
-  // Worker (safety)
   try {
     pdfjsLib.GlobalWorkerOptions.workerSrc =
       "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.14.305/pdf.worker.min.js";
   } catch (_) {}
 
   _pdfUrlForTab = url;
+
   const loadingTask = pdfjsLib.getDocument({ url });
-  _pdfDoc = await loadingTask.promise;
-
-  // Start at page 1
-  _pdfPage = 1;
-  pdfShow(true);
-  await pdfRenderSpread();
-}
-
-async function pdfOpenFromFile(file) {
-  if (!window.pdfjsLib) {
-    alert("pdf.js not loaded. Check your script tags.");
-    return;
-  }
-
-  // Worker (safety)
-  try {
-    pdfjsLib.GlobalWorkerOptions.workerSrc =
-      "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.14.305/pdf.worker.min.js";
-  } catch (_) {}
-
-  const buf = await file.arrayBuffer();
-  _pdfUrlForTab = null;
-
-  const loadingTask = pdfjsLib.getDocument({ data: buf });
   _pdfDoc = await loadingTask.promise;
 
   _pdfPage = 1;
@@ -368,7 +329,6 @@ document.getElementById("pdf-prev")?.addEventListener("click", async () => {
 document.getElementById("pdf-next")?.addEventListener("click", async () => {
   if (!_pdfDoc) return;
   _pdfPage = Math.min(_pdfDoc.numPages, _pdfPage + 2);
-  // keep left page odd for book feel
   if (_pdfPage % 2 === 0) _pdfPage = Math.max(1, _pdfPage - 1);
   await pdfRenderSpread();
 });
@@ -380,13 +340,27 @@ document.getElementById("pdf-zoom")?.addEventListener("input", async (e) => {
   await pdfRenderSpread();
 });
 
-document.getElementById("pdf-open-new")?.addEventListener("click", async () => {
-  if (_pdfUrlForTab) {
-    window.open(_pdfUrlForTab, "_blank");
+document.getElementById("pdf-open-new")?.addEventListener("click", () => {
+  if (_pdfUrlForTab) window.open(_pdfUrlForTab, "_blank");
+});
+
+  async function openCloudPdfInViewer(item) {
+  if (!item?.storage_path) {
+    alert("This item has no PDF stored.");
     return;
   }
-  alert("This PDF is not loaded from a URL. (It may be a local file.)");
-});
+
+  const user = await requireAuth();
+  if (!user) return;
+
+  const url = await cloudSignedUrl(item.storage_path);
+  await pdfOpenFromUrl(url);
+}
+
+  // If you already have a pdf.js viewer function, call it here.
+  // Minimal pattern: open in new tab OR feed into pdfjsLib.getDocument({ url })
+  // Example: window.open(url, "_blank");
+
 
   // If your app uses pdf.js text extraction only (no visual rendering), do this:
   if (!window.pdfjsLib) {
