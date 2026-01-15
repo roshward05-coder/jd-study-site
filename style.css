@@ -21,7 +21,7 @@ body{
   font-family: "Comic Sans MS", "Comic Sans", cursive, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji";
   /* Floral wallpaper + soft overlays */
   background:
-    url("assets/wallpaper/floral-pattern.jpg") repeat,
+    url("floral-pattern.jpg") repeat,
     radial-gradient(1200px 600px at 15% 10%, rgba(255,20,147,0.14), transparent 55%),
     radial-gradient(900px 500px at 80% 20%, rgba(255,182,193,0.10), transparent 60%),
     linear-gradient(rgba(8,10,14,0.55), rgba(8,10,14,0.55)),
@@ -41,7 +41,7 @@ body.theme-light{
   --border:rgba(2,6,23,0.10);
   --shadow: 0 12px 28px rgba(2,6,23,0.10);
   background:
-    url("assets/wallpaper/floral-pattern.jpg") repeat,
+    url("floral-pattern.jpg") repeat,
     linear-gradient(rgba(255,255,255,0.92), rgba(255,255,255,0.92));
   background-size: 600px 600px, auto;
   background-attachment: fixed;
