@@ -12,16 +12,13 @@
   --danger:#ff4d6d;
   --shadow: 0 16px 40px rgba(0,0,0,0.35);
   --radius: 14px;
-  --surface: rgba(255,255,255,0.88);
-  --surface2: rgba(255,255,255,0.72);
-  --textOnSurface: #0b1220; /* for light surfaces */
 }
 
 *{box-sizing:border-box}
 html,body{height:100%}
 body{
   margin:0;
-  font-family: "Comic Sans MS", "Comic Sans", cursive, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji";
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji";
   /* Floral wallpaper + soft overlays */
   background:
     url("floral-pattern.jpg") repeat,
@@ -34,38 +31,10 @@ body{
   color:var(--text);
 }
 
-/* Theme toggle (light) */
-body.theme-light{
-  --bg:#f7f8fb;
-  --panel:#ffffff;
-  --panel2:#ffffff;
-  --text:#0b1220;
-  --muted:#4b5563;
-  --border:rgba(2,6,23,0.10);
-  --shadow: 0 12px 28px rgba(2,6,23,0.10);
-  --surface: rgba(255,255,255,0.92);
-  --surface2: rgba(255,255,255,0.78);
-  --textOnSurface: #0b1220;
-  background:
-    url("floral-pattern.jpg") repeat,
-    linear-gradient(rgba(255,255,255,0.92), rgba(255,255,255,0.92));
-  background-size: 600px 600px, auto;
-  background-attachment: fixed;
-}
-/* Use tokens instead of repeating rgba() + hard-coded text */
-.sidebar,
-.view,
-.panel,
-.search input,
-#theme-toggle.ghost{
-  background: var(--surface);
-  color: var(--textOnSurface);
-}
-
 a{color:inherit}
 code{font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace}
 
-#app{min-height:100%; display:flex; flex-direction:column} /* remove trailing apostrophe */
+#app{min-height:100%; display:flex; flex-direction:column}
 
 #auth-status { white-space: nowrap; }
 #auth-box input { background:rgba(255,255,255,0.88); color:#0b1220; }
@@ -118,31 +87,16 @@ code{font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Libera
 
 .unit-switcher{margin-top:14px; padding-top:14px; border-top:1px solid var(--border)}
 .label{display:block; font-size:12px; color:var(--muted); margin:0 0 6px}
-/* One rule: form controls inherit the correct surface text color */
 select,input,textarea{
   width:100%;
   padding:10px 10px;
   border-radius:12px;
   border:1px solid var(--border);
-  background: var(--surface2);
-  color: inherit;              /* <-- key */
+  background: rgba(255,255,255,0.02);
+  color: inherit;
   outline:none;
 }
-
-/* Placeholder also inherits theme */
-input::placeholder,
-textarea::placeholder{
-  color: color-mix(in srgb, currentColor 45%, transparent);
-}
-
-/* Accessible focus: consistent across the whole site */
-:where(button, a, input, select, textarea):focus-visible{
-  outline: 2px solid color-mix(in srgb, var(--accent) 70%, transparent);
-  outline-offset: 2px;
-}
-
-}
-input::placeholder{color: rgba(159,176,198,0.7)}
+input::placeholder{color: rgba(11,18,32,0.45)}
 .row{display:flex; align-items:center}
 .between{justify-content:space-between}
 .gap{gap:8px}
@@ -154,7 +108,7 @@ button{
   border-radius:12px;
   border:1px solid rgba(255,20,147,0.32);
   background: linear-gradient(180deg, rgba(255,255,255,0.78), rgba(255,182,193,0.35));
-  color: var(--text);
+  color: #0b1220;
   cursor:pointer;
   box-shadow: 0 10px 22px rgba(2,6,23,0.10);
 }
@@ -170,13 +124,6 @@ button.ghost{
 }
 button.ghost:hover{background: rgba(255,255,255,0.06)}
 
-/* Theme toggle specific: make it translucent white like other panels */
-#theme-toggle.ghost{
-  border-color: var(--border);
-  background: rgba(255,255,255,0.88);
-  color: #0b1220;
-}
-#theme-toggle.ghost:hover{background: rgba(255,255,255,0.90)}
 button.danger{
   border-color: rgba(255,77,109,0.55);
   background: rgba(255,77,109,0.12);
@@ -243,29 +190,6 @@ button.danger:hover{background: rgba(255,77,109,0.18)}
   box-shadow: var(--shadow);
   color: #0b1220;
 }
-/* =========================================
-   Layout contract — pages cannot drift
-   ========================================= */
-
-/* All routed views MUST be .view */
-.main > section {
-  display: none; /* hidden by router */
-}
-
-.main > section.view {
-  display: block;
-}
-
-/* Prevent accidental nesting */
-.view > section {
-  all: unset;
-}
-
-/* Ensure grids never escape */
-.view > .grid {
-  width: 100%;
-}
-
 .view-head{margin-bottom:10px}
 .view-head h2{margin:0 0 6px}
 .muted{color:var(--muted)}
