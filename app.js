@@ -1,6 +1,47 @@
 (() => {
   'use strict';
 
+  // ----------------------------
+  // Supabase (for online PDF storage)
+  // 1) Create a Supabase project
+  // 2) Create a Storage bucket named "pdfs" (public)
+  // 3) Paste your Project URL + anon key below
+  // ----------------------------
+  const SUPABASE_URL = "https://ujwayetqmcvbqlckvjks.supabase.co";
+  const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVqd2F5ZXRxbWN2YnFsY2t2amtzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjgzNzM4NDksImV4cCI6MjA4Mzk0OTg0OX0.1v1MB3AgnmnmEY37C2p9KrwhCsMiG0yLV30-1jz4rP8";
+  const PDF_BUCKET = "pdfs";
+
+  function supabaseReady() {
+    return (
+      typeof window.supabase !== "undefined" &&
+      SUPABASE_URL &&
+      SUPABASE_ANON_KEY &&
+      !SUPABASE_URL.includes("PASTE_YOUR_") &&
+      !SUPABASE_ANON_KEY.includes("PASTE_YOUR_")
+    );
+  }
+
+  const sb = supabaseReady() ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY) : null;
+
+  async function uploadPdfToSupabase(file) {
+    if (!sb) throw new Error("Supabase not configured.");
+    const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
+    const rand = Math.random().toString(16).slice(2);
+    const path = `uploads/${Date.now()}_${rand}_${safeName}`;
+
+    const { error } = await sb.storage.from(PDF_BUCKET).upload(path, file, {
+      cacheControl: "3600",
+      upsert: false,
+      contentType: file.type || "application/pdf",
+    });
+    if (error) throw error;
+
+    const { data } = sb.storage.from(PDF_BUCKET).getPublicUrl(path);
+    if (!data?.publicUrl) throw new Error("Could not create public URL.");
+    return { storagePath: path, publicUrl: data.publicUrl };
+  }
+
+
   // Configure PDF.js worker
   if (typeof pdfjsLib !== 'undefined') {
     pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.14.305/pdf.worker.min.js';
@@ -233,9 +274,6 @@
     btn.addEventListener('click', () => show(btn.dataset.view));
   });
 
-  // ----------------------------
-  // Theme toggle
-  // ----------------------------
   $('#theme-toggle')?.addEventListener('click', () => {
     document.body.classList.toggle('theme-light');
     document.body.classList.toggle('theme-default');
@@ -315,7 +353,7 @@
     }
   }
 
-  function addItem({ title, type, tags, content, pdfData }) {
+  function addItem({ title, type, tags, content, pdfUrl, storagePath }) {
     const it = {
       id: uid(),
       unitId: activeUnitId,
@@ -323,7 +361,8 @@
       type: type || 'note',
       tags: Array.isArray(tags) ? tags : [],
       content: content || '',
-      pdfData: pdfData || null, // Store PDF as base64
+      pdfUrl: pdfUrl || null,
+      storagePath: storagePath || null, // Store PDF as base64
       created: now(),
       pinned: false
     };
@@ -349,21 +388,41 @@
     const type = $('#item-type')?.value || 'note';
     const tags = normaliseTags($('#item-tags')?.value || '');
     for (const f of files) {
-      const isPDF = f.type === 'application/pdf' || f.name.toLowerCase().endsWith('.pdf');
+            const isPDF = f.type === 'application/pdf' || f.name.toLowerCase().endsWith('.pdf');
       if (isPDF) {
-        // Store PDF as base64
-        const reader = new FileReader();
-        reader.onload = async (evt) => {
-          const pdfData = evt.target.result; // base64 string
+        try {
+          // 1) Upload PDF online (Supabase Storage) when configured
+          // 2) Extract searchable text with PDF.js
           const content = await extractTextFromPDF(f);
-          const it = addItem({ title: f.name, type, tags, content, pdfData });
-          openLibraryItem(it.id);
+
+          if (sb) {
+            const { storagePath, publicUrl } = await uploadPdfToSupabase(f);
+            const it = addItem({ title: f.name, type, tags, content, pdfUrl: publicUrl, storagePath });
+            openLibraryItem(it.id);
+          } else {
+            // Fallback: store as base64 locally (works offline, but not recommended for large PDFs)
+            const reader = new FileReader();
+            reader.onload = async (evt) => {
+              const pdfUrl = evt.target.result; // data URL
+              const it = addItem({ title: f.name, type, tags, content, pdfUrl, storagePath: null });
+              openLibraryItem(it.id);
+              renderLibrary();
+              renderTags();
+              renderStats();
+              renderUnitCards();
+            };
+            reader.readAsDataURL(f);
+            continue;
+          }
+
           renderLibrary();
           renderTags();
           renderStats();
           renderUnitCards();
-        };
-        reader.readAsDataURL(f);
+        } catch (err) {
+          console.error(err);
+          alert('PDF upload failed. Check Supabase settings and try again.');
+        }
       } else {
         const content = await f.text();
         addItem({ title: f.name, type, tags, content });
@@ -386,13 +445,13 @@
   let currentPDFPages = [];
   let currentPDFPage = 1;
   
-  async function renderPDFViewer(pdfData) {
+  async function renderPDFViewer(pdfUrl) {
     const container = $('#pdf-viewer-container');
     if (!container) return;
     
     try {
       // Load PDF
-      const loadingTask = pdfjsLib.getDocument(pdfData);
+      const loadingTask = pdfjsLib.getDocument(pdfUrl);
       const pdf = await loadingTask.promise;
       currentPDFPages = [];
       
@@ -449,9 +508,9 @@
     $('#open-item-meta').textContent = `${it.type.toUpperCase()} • ${it.tags.join(', ') || 'No tags'} • ${new Date(it.created).toLocaleString()}`;
     
     // Check if this item has PDF data
-    if (it.pdfData) {
+    if (it.pdfUrl) {
       // Show PDF viewer
-      renderPDFViewer(it.pdfData);
+      renderPDFViewer(it.pdfUrl);
       $('#extract-text-btn').style.display = 'inline-block';
       $('#doc-body').style.display = 'none';
       $('#pdf-viewer-container').style.display = 'block';
@@ -596,7 +655,7 @@
   $('#extract-text-btn')?.addEventListener('click', () => {
     if (!openItemId) return;
     const it = items.find((x) => x.id === openItemId);
-    if (!it || !it.pdfData) return;
+    if (!it || !it.pdfUrl) return;
     
     // Toggle between PDF view and text view
     const pdfContainer = $('#pdf-viewer-container');
