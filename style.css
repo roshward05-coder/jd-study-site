@@ -384,3 +384,33 @@ mark.mark{
 @media (max-width: 560px){
   .month{width:100%}
 }
+
+
+/* Modal */
+.modal{
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: rgba(0,0,0,0.35);
+  z-index: 9999;
+}
+.modal-card{
+  width: min(820px, 92vw);
+  max-height: 86vh;
+  overflow: auto;
+  border-radius: 16px;
+}
+.code{
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+}
+
+
+/* minor polish */
+.top-actions{gap:10px}
+
+
+.toast{position:fixed; left:50%; bottom:22px; transform:translateX(-50%); padding:10px 14px; border-radius:12px; background:rgba(255,255,255,0.92); color:#0b1220; border:1px solid rgba(0,0,0,0.08); box-shadow: 0 16px 40px rgba(0,0,0,0.25); z-index:9999; max-width:min(520px, calc(100vw - 28px));}
+.toast.show{display:block;}
