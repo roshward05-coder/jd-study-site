@@ -2,192 +2,66 @@
   'use strict';
 
   // ----------------------------
-  // Supabase (for online PDF storage)
-  // 1) Create a Supabase project
-  // 2) Create a Storage bucket named "pdfs" (public)
-  // 3) Paste your Project URL + anon key below
+  // Local-only PDF storage (IndexedDB)
+  // - PDFs are saved on the user's own device (browser storage)
+  // - Works offline and does NOT require Supabase
+  // - Storage is per-browser/per-origin (localhost, your domain, or file://)
+  //
+  // Notes:
+  // - Browsers enforce storage quotas; very large libraries may hit limits
+  // - Clearing site data / browser storage will remove saved PDFs
   // ----------------------------
-  // ----------------------------
-// Supabase (public PDF storage)
-// - Put your Project URL + anon public key in the modal (Supabase button) OR paste below.
-// - Storage bucket name: "library" (recommended) or your bucket name.
-// ----------------------------
-const DEFAULT_SUPABASE_URL = "https://ujwayetqmcvbqlckvjks.supabase.co";
-const DEFAULT_SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVqd2F5ZXRxbWN2YnFsY2t2amtzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjgzNzM4NDksImV4cCI6MjA4Mzk0OTg0OX0.1v1MB3AgnmnmEY37C2p9KrwhCsMiG0yLV30-1jz4rP8";
-const DEFAULT_PDF_BUCKET = "library";
 
-function getSbConfig() {
-  try {
-    const url = (localStorage.getItem("SB_URL") || DEFAULT_SUPABASE_URL).trim();
-    const key = (localStorage.getItem("SB_KEY") || DEFAULT_SUPABASE_ANON_KEY).trim();
-    const bucket = (localStorage.getItem("library") || DEFAULT_PDF_BUCKET).trim() || DEFAULT_PDF_BUCKET;
-    return { url, key, bucket };
-  } catch {
-    return { url: DEFAULT_SUPABASE_URL, key: DEFAULT_SUPABASE_ANON_KEY, bucket: DEFAULT_PDF_BUCKET };
-  }
-}
+  const PDF_DB = 'jdh_pdf_db_v1';
+  const PDF_NS_SEP = '::';
+  function pdfNS(key){ return (currentProfileId || 'guest') + PDF_NS_SEP + key; }
+  const PDF_STORE = 'pdfs';
 
-function supabaseReady() {
-  const { url, key } = getSbConfig();
-  return (
-    typeof window.supabase !== "undefined" &&
-    url &&
-    key &&
-    !key.includes("...") &&
-    url.startsWith("https://") &&
-    url.includes(".supabase.co")
-  );
-}
-
-const sb = supabaseReady() ? window.supabase.createClient(getSbConfig().url, getSbConfig().key) : null;
-const PDF_BUCKET = getSbConfig().bucket;
-
-  // ----------------------------
-  // Auth (required for uploads)
-  // ----------------------------
-  async function getSessionUser() {
-    if (!sb || !sb.auth) return null;
-    const { data, error } = await sb.auth.getSession();
-    if (error) return null;
-    return data?.session?.user || null;
-  }
-
-  async function ensureLoggedInForUpload() {
-    if (!sb || !sb.auth) return false;
-    const user = await getSessionUser();
-    if (user) return true;
-    openAuthModal();
-    return false;
-  }
-
-  async function signInMagicLink(email) {
-    if (!sb || !sb.auth) throw new Error("Supabase not configured.");
-    const redirectTo = (window.location && window.location.origin && window.location.origin !== "null")
-      ? window.location.origin
-      : null;
-
-    const { error } = await sb.auth.signInWithOtp({
-      email,
-      options: redirectTo ? { emailRedirectTo: redirectTo } : {}
+  function openPdfDB() {
+    return new Promise((resolve, reject) => {
+      const req = indexedDB.open(PDF_DB, 1);
+      req.onupgradeneeded = () => {
+        const db = req.result;
+        if (!db.objectStoreNames.contains(PDF_STORE)) {
+          db.createObjectStore(PDF_STORE);
+        }
+      };
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
     });
-    if (error) throw error;
   }
 
-  async function signOut() {
-    if (!sb || !sb.auth) return;
-    await sb.auth.signOut();
-  }
-
-  // UI hooks
-  function openAuthModal() {
-    const m = document.getElementById('auth-modal');
-    if (!m) return;
-    m.style.display = 'flex';
-    const email = document.getElementById('auth-email');
-    if (email) email.focus();
-  }
-  function closeAuthModal() {
-    const m = document.getElementById('auth-modal');
-    if (!m) return;
-    m.style.display = 'none';
-  }
-
-  async function refreshAuthUI() {
-    const btn = document.getElementById('auth-btn');
-    const signOutBtn = document.getElementById('auth-signout');
-    const status = document.getElementById('auth-status');
-    const fileInput = document.getElementById('file-input');
-
-    if (!btn) return;
-
-    if (!sb || !sb.auth) {
-      btn.style.display = 'none';
-      if (fileInput) fileInput.disabled = true;
-      return;
-    }
-
-    btn.style.display = 'inline-flex';
-    const user = await getSessionUser();
-
-    if (user) {
-      btn.textContent = 'Logout';
-      btn.title = user.email || 'Logged in';
-      if (signOutBtn) signOutBtn.style.display = 'inline-flex';
-      if (status) status.textContent = `Logged in as ${user.email || 'user'}. Uploads enabled.`;
-      if (fileInput) fileInput.disabled = false;
-    } else {
-      btn.textContent = 'Login';
-      btn.title = 'Login to upload';
-      if (signOutBtn) signOutBtn.style.display = 'none';
-      if (status) status.textContent = 'Not logged in. Uploads are disabled.';
-      if (fileInput) fileInput.disabled = true;
-    }
-  }
-
-  async function cloudInsertLibraryItem({ unit, title, type, tags, storage_path, public_url, content_text }) {
-    const user = await getSessionUser();
-    if (!user) throw new Error("Not logged in.");
-    const payload = {
-      user_id: user.id,
-      unit,
-      title,
-      type,
-      tags: Array.isArray(tags) ? tags : [],
-      storage_path,
-      public_url,
-      content_text: content_text || ''
-    };
-    const { data, error } = await sb.from('library_items').insert([payload]).select('id').single();
-    if (error) throw error;
-    return data?.id || null;
-  }
-
-  async function cloudLoadLibraryItems() {
-    const user = await getSessionUser();
-    if (!user) return [];
-    const { data, error } = await sb.from('library_items').select('*').order('created_at', { ascending: false });
-    if (error) throw error;
-    return data || [];
-  }
-
-  function mapRowToItem(row) {
-    return {
-      id: row.id,
-      unitId: unitId || activeUnitId, // will be re-set by unit matching below
-      title: row.title || 'Untitled',
-      type: row.type || 'note',
-      tags: Array.isArray(row.tags) ? row.tags : [],
-      content: row.content_text || '',
-      pdfUrl: row.public_url || null,
-      storagePath: row.storage_path || null,
-      created: row.created_at ? new Date(row.created_at).toISOString() : now(),
-      pinned: false,
-      cloudId: row.id,
-      unit: row.unit || null
-    };
-  }
-
-
-  async function uploadPdfToSupabase(file) {
-    if (!sb) throw new Error("Supabase not configured.");
-    const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
-    const rand = Math.random().toString(16).slice(2);
-    const path = `uploads/${Date.now()}_${rand}_${safeName}`;
-
-    const { error } = await sb.storage.from(PDF_BUCKET).upload(path, file, {
-      cacheControl: "3600",
-      upsert: false,
-      contentType: file.type || "application/pdf",
+  async function pdfPut(key, blob) {
+    const db = await openPdfDB();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(PDF_STORE, 'readwrite');
+      tx.objectStore(PDF_STORE).put(blob, pdfNS(key));
+      tx.oncomplete = () => resolve(true);
+      tx.onerror = () => reject(tx.error);
     });
-    if (error) throw error;
-
-    const { data } = sb.storage.from(PDF_BUCKET).getPublicUrl(path);
-    if (!data?.publicUrl) throw new Error("Could not create public URL.");
-    return { storagePath: path, publicUrl: data.publicUrl };
   }
 
+  async function pdfGet(key) {
+    const db = await openPdfDB();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(PDF_STORE, 'readonly');
+      const req = tx.objectStore(PDF_STORE).get(pdfNS(key));
+      req.onsuccess = () => resolve(req.result || null);
+      req.onerror = () => reject(req.error);
+    });
+  }
 
-  // Configure PDF.js worker
+  async function pdfDel(key) {
+    const db = await openPdfDB();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(PDF_STORE, 'readwrite');
+      tx.objectStore(PDF_STORE).delete(pdfNS(key));
+      tx.oncomplete = () => resolve(true);
+      tx.onerror = () => reject(tx.error);
+    });
+  }
+
+// Configure PDF.js worker
   if (typeof pdfjsLib !== 'undefined') {
     pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.14.305/pdf.worker.min.js';
   }
@@ -239,11 +113,104 @@ const PDF_BUCKET = getSbConfig().bucket;
       return fallback;
     }
   }
-  function save(key, value) {
+  function rawLoad(key, fallback) {
+    try {
+      const raw = localStorage.getItem(key);
+      if (raw === null || raw === undefined) return fallback;
+      return JSON.parse(raw);
+    } catch (_) {
+      return fallback;
+    }
+  }
+  function rawSave(key, value) {
     localStorage.setItem(key, JSON.stringify(value));
   }
 
+  // ----------------------------
+  // Local Profiles (login = save file)
+  // Data remains on this device/browser; profiles simply namespace storage.
+  // This is NOT a secure authentication system.
+  // ----------------------------
+  const PROFILE_KEY = {
+    CURRENT: 'jdh_current_profile',
+    PROFILES: 'jdh_profiles'
+  };
+
+  function normEmail(email) {
+    return (email || '').trim().toLowerCase();
+  }
+
+  function profilePrefix(profileId) {
+    return `jdh_profile:${profileId || 'guest'}:`;
+  }
+
+  let currentProfileId = rawLoad(PROFILE_KEY.CURRENT, null);
+
+  function dataKey(key) {
+    // Keys used by the app state are namespaced by profile
+    return profilePrefix(currentProfileId) + key;
+  }
+
+  function load(key, fallback) {
+    return rawLoad(dataKey(key), fallback);
+  }
+  function save(key, value) {
+    rawSave(dataKey(key), value);
+  }
+
+  async function sha256Hex(text) {
+    const enc = new TextEncoder().encode(text);
+    const buf = await crypto.subtle.digest('SHA-256', enc);
+    return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2,'0')).join('');
+  }
+
+  function getProfiles() {
+    return rawLoad(PROFILE_KEY.PROFILES, { byId: {} });
+  }
+
+  async function createProfile(email, password) {
+    const e = normEmail(email);
+    if (!e) throw new Error('Please enter an email.');
+    if (!password || password.length < 4) throw new Error('Password must be at least 4 characters.');
+    const p = getProfiles();
+    if (p.byId[e]) throw new Error('Profile already exists. Sign in instead.');
+    p.byId[e] = { email: e, passHash: await sha256Hex(password) };
+    rawSave(PROFILE_KEY.PROFILES, p);
+    return true;
+  }
+
+  async function signIn(email, password) {
+    const e = normEmail(email);
+    const p = getProfiles();
+    const profile = p.byId[e];
+    if (!profile) throw new Error('Profile not found. Create it first.');
+    const passHash = await sha256Hex(password || '');
+    if (passHash !== profile.passHash) throw new Error('Incorrect password.');
+    currentProfileId = e;
+    rawSave(PROFILE_KEY.CURRENT, currentProfileId);
+    return true;
+  }
+
+  function signOut() {
+    currentProfileId = null;
+    rawSave(PROFILE_KEY.CURRENT, null);
+  }
+
+  function continueGuest() {
+    currentProfileId = null;
+    rawSave(PROFILE_KEY.CURRENT, null);
+  }
+
+  function isSignedIn() {
+    return !!currentProfileId;
+  }
+
+  function currentLabel() {
+    return currentProfileId ? currentProfileId : 'Guest';
+  }
+
   function escapeHtml(s) {
+(s) {
     return (s || '').replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
   }
 
@@ -290,7 +257,7 @@ const PDF_BUCKET = getSbConfig().bucket;
       if (oldUnits.length) {
         units = oldUnits.map((u) => ({ id: u.id || uid(), name: u.name, created: now() }));
       } else {
-        units = [{ id: id || uid(), name: 'My Unit', created: now() }];
+        units = [{ id: uid(), name: 'My Unit', created: now() }];
       }
 
       const fallbackUnit = units[0].id;
@@ -388,7 +355,51 @@ const PDF_BUCKET = getSbConfig().bucket;
   // AGLC4 citation history: {id, type, full, shortTitle, created}
   let citations = load(KEY.CITATIONS, []);
 
-  let activeUnitId = null;
+  
+  function persistAll() {
+    save(KEY.UNITS, units);
+    save(KEY.ITEMS, items);
+    save(KEY.DECKS, decks);
+    save(KEY.TODOS, todos);
+    save(KEY.TT, timetable);
+    save(KEY.ISSUES, issues);
+    save(KEY.MASTERY, mastery);
+    save(KEY.STREAK, streak);
+    save(KEY.SELECTED_FOR_TEST, selectedForTest);
+    save(KEY.CITATIONS, citations);
+  }
+
+  async function wipeCurrentProfile(confirmUser = true) {
+    if (confirmUser) {
+      const msg = isSignedIn()
+        ? `This will wipe all data for ${currentLabel()} on this device (including stored PDFs). Continue?`
+        : 'This will wipe all guest data on this device (including stored PDFs). Continue?';
+      if (!confirm(msg)) return false;
+    }
+
+    // Delete PDFs referenced by current items
+    const keys = (items || []).filter(it => it.pdfKey).map(it => it.pdfKey);
+    await Promise.all(keys.map(k => pdfDel(k).catch(()=>{})));
+
+    // Remove namespaced storage keys
+    Object.values(KEY).forEach((k) => localStorage.removeItem(dataKey(k)));
+
+    // Reset in-memory state
+    units = [];
+    items = [];
+    decks = [];
+    timetable = [];
+    todos = [];
+    issues = [];
+    mastery = {};
+    streak = { lastDayISO: null, count: 0 };
+    selectedForTest = [];
+    citations = [];
+
+    return true;
+  }
+
+let activeUnitId = null;
   let openItemId = null;
 
   // ----------------------------
@@ -473,6 +484,50 @@ const PDF_BUCKET = getSbConfig().bucket;
     refreshAll();
   });
 
+  $('#delete-unit')?.addEventListener('click', () => {
+    if (!activeUnitId) return;
+    if (units.length <= 1) {
+      alert('You must keep at least one unit.');
+      return;
+    }
+    const u = units.find(x => x.id === activeUnitId);
+    if (!u) return;
+    const msg =
+      `Delete unit “${u.name}”?\n\nThis will permanently remove:\n• its library items\n• its flashcard decks\n• its timetable + to‑dos + issues\n\n(Any PDFs stored for items in this unit will also be deleted from your browser storage.)`;
+    if (!confirm(msg)) return;
+
+    // Delete PDFs for items in this unit
+    const unitItems = items.filter(it => it.unitId === activeUnitId);
+    Promise.all(unitItems.filter(it => it.pdfKey).map(it => pdfDel(it.pdfKey).catch(()=>{})))
+      .finally(() => {
+        // Remove unit-linked data
+        items = items.filter(it => it.unitId !== activeUnitId);
+        decks = decks.filter(d => d.unitId !== activeUnitId);
+        todos = todos.filter(td => td.unitId !== activeUnitId);
+        timetable = timetable.filter(tt => tt.unitId !== activeUnitId);
+        issues = issues.filter(is => is.unitId !== activeUnitId);
+
+        delete mastery[activeUnitId];
+
+        units = units.filter(x => x.id !== activeUnitId);
+
+        // Select another unit
+        activeUnitId = units[0]?.id || null;
+
+        save(KEY.UNITS, units);
+        save(KEY.ITEMS, items);
+        save(KEY.DECKS, decks);
+        save(KEY.TODOS, todos);
+        save(KEY.TT, timetable);
+        save(KEY.ISSUES, issues);
+        save(KEY.MASTERY, mastery);
+
+        renderUnitSelect();
+        refreshAll();
+      });
+  });
+
+
   // ----------------------------
   // Library: adding / uploading
   // ----------------------------
@@ -498,7 +553,7 @@ const PDF_BUCKET = getSbConfig().bucket;
     }
   }
 
-  function addItem({ id, unitId, title, type, tags, content, pdfUrl, storagePath, cloudId, unit }) {
+  function addItem({ title, type, tags, content, pdfKey = null, pdfName = null }) {
     const it = {
       id: uid(),
       unitId: activeUnitId,
@@ -506,10 +561,8 @@ const PDF_BUCKET = getSbConfig().bucket;
       type: type || 'note',
       tags: Array.isArray(tags) ? tags : [],
       content: content || '',
-      pdfUrl: pdfUrl || null,
-      storagePath: storagePath || null,
-      cloudId: cloudId || null,
-      unit: unit || null,
+      pdfKey: pdfKey || null,   // IndexedDB key for the stored PDF blob
+      pdfName: pdfName || null,
       created: now(),
       pinned: false
     };
@@ -538,48 +591,21 @@ const PDF_BUCKET = getSbConfig().bucket;
             const isPDF = f.type === 'application/pdf' || f.name.toLowerCase().endsWith('.pdf');
       if (isPDF) {
         try {
-          // 1) Upload PDF online (Supabase Storage) when configured
-          // 2) Extract searchable text with PDF.js
+          // Store the PDF locally (IndexedDB) + extract searchable text with PDF.js
           const content = await extractTextFromPDF(f);
 
-          if (sb) {
-            const ok = await ensureLoggedInForUpload();
-            if (!ok) { 
-              // keep file input selected but stop
-              continue;
-            }
-            const { storagePath, publicUrl } = await uploadPdfToSupabase(f);
-            let cloudId = null;
-            try{
-              cloudId = await cloudInsertLibraryItem({
-                unit: (units.find(u=>u.id===activeUnitId)?.name) || 'General',
-                title: f.name,
-                type,
-                tags,
-                storage_path: storagePath,
-                public_url: publicUrl,
-                content_text: content
-              });
-            }catch(e){
-              console.warn('Could not save metadata to library_items:', e);
-            }
-            const it = addItem({ id: cloudId || null, title: f.name, type, tags, content, pdfUrl: publicUrl, storagePath, cloudId, unit: (units.find(u=>u.id===activeUnitId)?.name) || 'General' });
-            openLibraryItem(it.id);
-          } else {
-            // Fallback: store as base64 locally (works offline, but not recommended for large PDFs)
-            const reader = new FileReader();
-            reader.onload = async (evt) => {
-              const pdfUrl = evt.target.result; // data URL
-              const it = addItem({ title: f.name, type, tags, content, pdfUrl, storagePath: null });
-              openLibraryItem(it.id);
-              renderLibrary();
-              renderTags();
-              renderStats();
-              renderUnitCards();
-            };
-            reader.readAsDataURL(f);
-            continue;
-          }
+          const pdfKey = 'pdf_' + uid();
+          await pdfPut(pdfKey, f); // File is a Blob
+
+          const it = addItem({
+            title: f.name,
+            type,
+            tags,
+            content,
+            pdfKey,
+            pdfName: f.name
+          });
+          openLibraryItem(it.id);
 
           renderLibrary();
           renderTags();
@@ -587,7 +613,7 @@ const PDF_BUCKET = getSbConfig().bucket;
           renderUnitCards();
         } catch (err) {
           console.error(err);
-          alert('PDF upload failed. If you want online storage, open Supabase settings and paste your URL + anon key.');
+          alert('PDF import failed. If you opened this via file://, try running a local server (Live Server) for best results.');
         }
       } else {
         const content = await f.text();
@@ -610,6 +636,7 @@ const PDF_BUCKET = getSbConfig().bucket;
   // PDF Viewer
   let currentPDFPages = [];
   let currentPDFPage = 1;
+  let currentPDFObjectURL = null;
   
   async function renderPDFViewer(pdfUrl) {
     const container = $('#pdf-viewer-container');
@@ -666,44 +693,46 @@ const PDF_BUCKET = getSbConfig().bucket;
     return items.filter((it) => it.unitId === activeUnitId);
   }
 
-  function openLibraryItem(id) {
+  async function openLibraryItem(id) {
     const it = items.find((x) => x.id === id);
     if (!it) return;
     openItemId = id;
     $('#open-item-title').textContent = it.title;
     $('#open-item-meta').textContent = `${it.type.toUpperCase()} • ${it.tags.join(', ') || 'No tags'} • ${new Date(it.created).toLocaleString()}`;
     
-    // Check if this item has PDF data
-    if (it.pdfUrl) {
-      // Show PDF viewer
-      renderPDFViewer(it.pdfUrl);
-      $('#extract-text-btn').style.display = 'inline-block';
-      // Public sharing
-      const shareBtn = $('#copy-public-link');
-      if (shareBtn) {
-        shareBtn.style.display = (it.pdfUrl && /^https?:\/\//.test(it.pdfUrl)) ? 'inline-block' : 'none';
-        shareBtn.onclick = async () => {
-          const url = it.pdfUrl;
-          const origin = (window.location && window.location.origin && window.location.origin !== 'null') ? window.location.origin : '';
-          const deep = origin ? `${origin}${window.location.pathname || ''}?pdf=${encodeURIComponent(url)}` : url;
-          try {
-            await navigator.clipboard.writeText(deep);
-            toast('Public link copied.');
-          } catch(e) {
-            prompt('Copy this public link:', deep);
-          }
-        };
+    // Check if this item has a stored PDF (IndexedDB)
+    if (it.pdfKey) {
+      try {
+        const blob = await pdfGet(it.pdfKey);
+        if (!blob) throw new Error('PDF not found in local storage.');
+
+        // Clean up old object URL
+        if (currentPDFObjectURL) {
+          URL.revokeObjectURL(currentPDFObjectURL);
+          currentPDFObjectURL = null;
+        }
+
+        currentPDFObjectURL = URL.createObjectURL(blob);
+
+        // Show PDF viewer
+        await renderPDFViewer(currentPDFObjectURL);
+        $('#extract-text-btn').style.display = 'inline-block';
+        $('#doc-body').style.display = 'none';
+        $('#pdf-viewer-container').style.display = 'block';
+      } catch (err) {
+        console.error(err);
+        alert('Could not open the saved PDF (it may have been cleared from browser storage).');
+        $('#doc-body').textContent = it.content || '';
+        $('#doc-body').style.display = 'block';
+        $('#pdf-viewer-container').style.display = 'none';
+        $('#extract-text-btn').style.display = 'none';
       }
-      $('#doc-body').style.display = 'none';
-      $('#pdf-viewer-container').style.display = 'block';
     } else {
       // Show text content
       $('#doc-body').textContent = it.content || '';
       $('#doc-body').style.display = 'block';
       $('#pdf-viewer-container').style.display = 'none';
       $('#extract-text-btn').style.display = 'none';
-      const shareBtn = $('#copy-public-link');
-      if (shareBtn) shareBtn.style.display = 'none';
     }
     
     $('#summary').textContent = '—';
@@ -742,6 +771,14 @@ const PDF_BUCKET = getSbConfig().bucket;
         </div>
         <div class="muted small" style="margin-top:6px">${tags || '<span class="muted small">No tags</span>'}</div>
       `;
+
+      const delBtn = div.querySelector('.unit-del');
+      delBtn?.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        activeUnitId = c.unit.id;
+        renderUnitSelect();
+        $('#delete-unit')?.click();
+      });
 
       div.addEventListener('click', () => {
         openLibraryItem(it.id);
@@ -810,11 +847,13 @@ const PDF_BUCKET = getSbConfig().bucket;
   }
 
   // Delete open item
-  $('#delete-open')?.addEventListener('click', () => {
+  $('#delete-open')?.addEventListener('click', async () => {
     if (!openItemId) return;
     const it = items.find((x) => x.id === openItemId);
     if (!it) return;
     if (!confirm(`Delete “${it.title}”?`)) return;
+    if (it.pdfKey) { try { await pdfDel(it.pdfKey); } catch(e){} }
+    if (currentPDFObjectURL) { try { URL.revokeObjectURL(currentPDFObjectURL); } catch(e){} currentPDFObjectURL = null; }
     items = items.filter((x) => x.id !== openItemId);
     save(KEY.ITEMS, items);
     openItemId = null;
@@ -836,10 +875,10 @@ const PDF_BUCKET = getSbConfig().bucket;
   });
 
   // Extract text from PDF view
-  $('#extract-text-btn')?.addEventListener('click', () => {
+  $('#extract-text-btn')?.addEventListener('click', async () => {
     if (!openItemId) return;
     const it = items.find((x) => x.id === openItemId);
-    if (!it || !it.pdfUrl) return;
+    if (!it || !it.pdfKey) return;
     
     // Toggle between PDF view and text view
     const pdfContainer = $('#pdf-viewer-container');
@@ -2233,6 +2272,14 @@ const PDF_BUCKET = getSbConfig().bucket;
         <div class="muted small">${escapeHtml(it.type.toUpperCase())} • ${escapeHtml(units.find(u=>u.id===it.unitId)?.name || '')}</div>
         <div class="snippet">${escapeHtml(snippetOf(it.content, query))}</div>
       `;
+      const delBtn = div.querySelector('.unit-del');
+      delBtn?.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        activeUnitId = c.unit.id;
+        renderUnitSelect();
+        $('#delete-unit')?.click();
+      });
+
       div.addEventListener('click', () => {
         $('#global-search').value = '';
         container.style.display = 'none';
@@ -2314,7 +2361,10 @@ const PDF_BUCKET = getSbConfig().bucket;
       div.className = 'item';
       div.innerHTML = `
         <div class="row between">
-          <strong>${escapeHtml(c.unit.name)}</strong>
+          <div class="row gap" style="align-items:center">
+            <strong>${escapeHtml(c.unit.name)}</strong>
+            <button class="chip danger ghost unit-del" title="Delete unit" aria-label="Delete unit">✕</button>
+          </div>
           <span class="badge">${c.count} items</span>
         </div>
         <div class="row gap wrap" style="margin-top:8px">
@@ -2323,6 +2373,14 @@ const PDF_BUCKET = getSbConfig().bucket;
           <span class="badge">avg ${c.avg}%</span>
         </div>
       `;
+      const delBtn = div.querySelector('.unit-del');
+      delBtn?.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        activeUnitId = c.unit.id;
+        renderUnitSelect();
+        $('#delete-unit')?.click();
+      });
+
       div.addEventListener('click', () => {
         activeUnitId = c.unit.id;
         renderUnitSelect();
@@ -2346,20 +2404,50 @@ const PDF_BUCKET = getSbConfig().bucket;
   // ----------------------------
   // Settings: import/export/wipe
   // ----------------------------
-  $('#export-data')?.addEventListener('click', () => {
-    const payload = {
-      version: VERSION,
-      exportedAt: new Date().toISOString(),
-      units,
-      items,
-      decks,
-      todos,
-      timetable,
-      issues,
-      mastery,
-      streak
-    };
-    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+  $('#export-data')?.addEventListener('click', async () => {
+    try {
+      // Export includes: all state + PDFs (base64). Can be large.
+      const pdfBlobs = {};
+      for (const it of (items || [])) {
+        if (it.pdfKey) {
+          const blob = await pdfGet(it.pdfKey).catch(() => null);
+          if (blob) {
+            const b64 = await blobToBase64(blob);
+            pdfBlobs[it.pdfKey] = { mime: blob.type || 'application/pdf', b64 };
+          }
+        }
+      }
+
+      const payload = {
+        version: VERSION,
+        exportedAt: new Date().toISOString(),
+        profile: currentLabel(),
+        state: {
+          units,
+          items,
+          decks,
+          todos,
+          timetable,
+          issues,
+          mastery,
+          streak,
+          selectedForTest,
+          citations
+        },
+        pdfBlobs
+      };
+
+      const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `jd-study-hub-${(currentProfileId || 'guest').replace(/[^a-z0-9]+/gi,'_')}-export-${toISODate(new Date())}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      alert('Export failed: ' + err.message);
+    }
+  });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
@@ -2374,28 +2462,40 @@ const PDF_BUCKET = getSbConfig().bucket;
     try {
       const raw = await file.text();
       const data = JSON.parse(raw);
-      if (!data || !Array.isArray(data.units)) throw new Error('Invalid file format.');
-      if (!confirm('Import will replace your current local data. Continue?')) return;
 
-      units = data.units || [];
-      items = data.items || [];
-      decks = data.decks || [];
-      todos = data.todos || [];
-      timetable = data.timetable || [];
-      issues = data.issues || [];
-      mastery = data.mastery || {};
-      streak = data.streak || { lastDayISO: null, count: 0 };
+      const state = data.state || data; // allow older exports
+      if (!state || !Array.isArray(state.units)) throw new Error('Invalid file format.');
 
-      save(KEY.UNITS, units);
-      save(KEY.ITEMS, items);
-      save(KEY.DECKS, decks);
-      save(KEY.TODOS, todos);
-      save(KEY.TT, timetable);
-      save(KEY.ISSUES, issues);
-      save(KEY.MASTERY, mastery);
-      save(KEY.STREAK, streak);
-      save(KEY.V, VERSION);
+      if (!confirm('Import will replace the current profile data on this device. Continue?')) return;
 
+      // Wipe current profile data first (including PDFs referenced by current items)
+      await wipeCurrentProfile(false);
+
+      // Restore state
+      units = state.units || [];
+      items = state.items || [];
+      decks = state.decks || [];
+      todos = state.todos || [];
+      timetable = state.timetable || [];
+      issues = state.issues || [];
+      mastery = state.mastery || {};
+      streak = state.streak || { lastDayISO: null, count: 0 };
+      selectedForTest = state.selectedForTest || [];
+      citations = state.citations || [];
+
+      // Restore PDFs
+      const pdfBlobs = data.pdfBlobs || {};
+      const entries = Object.entries(pdfBlobs);
+      for (const [pdfKey, rec] of entries) {
+        if (rec && rec.b64) {
+          const blob = base64ToBlob(rec.b64, rec.mime || 'application/pdf');
+          await pdfPut(pdfKey, blob);
+        }
+      }
+
+      // Persist
+      persistAll();
+      ensureDefaultUnit();
       activeUnitId = units[0]?.id || null;
       refreshAll();
       alert('Import complete.');
@@ -2406,17 +2506,13 @@ const PDF_BUCKET = getSbConfig().bucket;
     }
   });
 
-  $('#wipe-data')?.addEventListener('click', () => {
-    if (!confirm('This wipes all local study data in this browser. Continue?')) return;
-    Object.values(KEY).forEach((k) => localStorage.removeItem(k));
-    localStorage.removeItem('sd_units');
-    localStorage.removeItem('sd_docs');
-    localStorage.removeItem('sd_lectures');
-    localStorage.removeItem('sd_decks');
-    localStorage.removeItem('sd_timetable');
-    localStorage.removeItem('sd_todos');
-    localStorage.removeItem('sd_issues');
-    location.reload();
+  $('#wipe-data')?.addEventListener('click', async () => {
+    const ok = await wipeCurrentProfile(true);
+    if (!ok) return;
+    ensureDefaultUnit();
+    renderUnitSelect();
+    refreshAll();
+    alert('Wiped.');
   });
 
   // ----------------------------
@@ -2461,188 +2557,86 @@ const PDF_BUCKET = getSbConfig().bucket;
     renderStats();
     renderTestBuilderUI();
   }
-
-  
-  // Supabase settings modal (optional)
-  (function initSupabaseModal(){
-    const openBtn = $('#sb-open');
-    const modal = $('#sb-modal');
-    const closeBtn = $('#sb-close');
-    const saveBtn = $('#sb-save');
-    const clearBtn = $('#sb-clear');
-    const status = $('#sb-status');
-    const urlIn = $('#sb-url');
-    const keyIn = $('#sb-key');
-    const bucketIn = $('#sb-bucket');
-
-    function setStatus(msg){ if(status) status.textContent = msg || ''; }
-
-    function open(){
-      if(!modal) return;
-      const cfg = getSbConfig();
-      if(urlIn) urlIn.value = cfg.url || '';
-      if(keyIn) keyIn.value = cfg.key || '';
-      if(bucketIn) bucketIn.value = cfg.bucket || DEFAULT_PDF_BUCKET;
-      modal.style.display = 'flex';
-      modal.setAttribute('aria-hidden','false');
-      setStatus(supabaseReady() ? 'Configured.' : 'Not configured.');
-    }
-
-    function close(){
-      if(!modal) return;
-      modal.style.display = 'none';
-      modal.setAttribute('aria-hidden','true');
-      setStatus('');
-    }
-
-    openBtn?.addEventListener('click', open);
-    closeBtn?.addEventListener('click', close);
-    modal?.addEventListener('click', (e) => { if(e.target === modal) close(); });
-    document.addEventListener('keydown', (e) => { if(e.key === 'Escape') close(); });
-
-    saveBtn?.addEventListener('click', () => {
-      const url = (urlIn?.value || '').trim();
-      const key = (keyIn?.value || '').trim();
-      const bucket = (bucketIn?.value || DEFAULT_PDF_BUCKET).trim() || DEFAULT_PDF_BUCKET;
-
-      if(!url || !key){
-        setStatus('Please paste both URL and anon key.');
-        return;
-      }
-      if(!url.startsWith('https://') || !url.includes('.supabase.co')){
-        setStatus('URL should look like https://xxxx.supabase.co');
-        return;
-      }
-      localStorage.setItem('SB_URL', url);
-      localStorage.setItem('SB_KEY', key);
-      localStorage.setItem('SB_BUCKET', bucket);
-      setStatus('Saved. Refreshing…');
-      // reload to re-init sb client cleanly
-      setTimeout(() => location.reload(), 400);
-    });
-
-    clearBtn?.addEventListener('click', () => {
-      localStorage.removeItem('SB_URL');
-      localStorage.removeItem('SB_KEY');
-      localStorage.removeItem('SB_BUCKET');
-      setStatus('Cleared. Refreshing…');
-      setTimeout(() => location.reload(), 300);
-    });
-  })()
-
-  // Auth modal + gating (login required for uploads)
-  (function initAuthModal(){
-    const btn = $('#auth-btn');
-    const modal = $('#auth-modal');
-    const closeBtn = $('#auth-close');
-    const sendBtn = $('#auth-send-link');
-    const signOutBtn = $('#auth-signout');
-    const status = $('#auth-status');
-    const emailIn = $('#auth-email');
-
-    function setStatus(msg){ if(status) status.textContent = msg || ''; }
-
-    btn?.addEventListener('click', async () => {
-      if (!sb || !sb.auth) return;
-      const user = await getSessionUser();
-      if (user) {
-        await signOut();
-        setStatus('Signed out.');
-        await refreshAuthUI();
-        return;
-      }
-      openAuthModal();
-      await refreshAuthUI();
-    });
-
-    closeBtn?.addEventListener('click', closeAuthModal);
-    modal?.addEventListener('click', (e)=>{ if(e.target === modal) closeAuthModal(); });
-
-    sendBtn?.addEventListener('click', async () => {
-      try{
-        if (!sb) throw new Error('Supabase not configured.');
-        const email = (emailIn?.value || '').trim();
-        if (!email) { setStatus('Enter an email.'); return; }
-        setStatus('Sending magic link…');
-        await signInMagicLink(email);
-        setStatus('Magic link sent. Check your inbox and click the link to finish login.');
-      } catch(err){
-        console.error(err);
-        setStatus(err?.message || 'Login failed.');
-      }
-    });
-
-    signOutBtn?.addEventListener('click', async () => {
-      await signOut();
-      setStatus('Signed out.');
-      await refreshAuthUI();
-    });
-
-    // Watch auth changes
-    try{
-      sb?.auth?.onAuthStateChange(async () => {
-        await refreshAuthUI();
-        // When logged in, prefer cloud library
-        if (sb) {
-          try{
-            const user = await getSessionUser();
-            if (user) {
-              const rows = await cloudLoadLibraryItems();
-              // Map rows to items and merge units by name
-              const mapped = rows.map(mapRowToItem);
-              // resolve unitId by unit name
-              mapped.forEach(it=>{
-                if (it.unit) {
-                  const u = units.find(x=> (x.name||'').toLowerCase() === (it.unit||'').toLowerCase());
-                  if (u) it.unitId = u.id;
-                }
-              });
-              items = mapped;
-              save(KEY.ITEMS, items);
-              refreshAll();
-            }
-          }catch(e){ console.warn(e); }
-        }
-      });
-    }catch(e){ /* ignore */ }
-
-  })();
-;
-
-// Init
-  ensureDefaultUnit();
-  renderUnitSelect();
-  refreshAll();
-  initCitations();
-
-  // Auth UI state (uploads require login; viewing is public)
-  refreshAuthUI();
-
-  // Deep-link public PDF viewing: ?pdf=<public_url>
-  try{
-    const params = new URLSearchParams(window.location.search || '');
-    const pdf = params.get('pdf');
-    if (pdf) {
-      // Create a temporary item and open it
-      const it = addItem({ title: 'Shared PDF', type: 'pdf', tags: [], content: '', pdfUrl: pdf, storagePath: null });
-      openLibraryItem(it.id);
-      show('library');
-    } else {
-      show('units');
-    }
-  }catch(e){
+  function startApp() {
+    ensureDefaultUnit();
+    renderUnitSelect();
+    refreshAll();
+    initCitations();
     show('units');
+    updateAccountUI();
   }
 
-})()
-  // Small toast notification
-  function toast(msg, ms=2200){
-    const el = document.getElementById('toast');
-    if (!el) { alert(msg); return; }
-    el.textContent = msg || '';
-    el.classList.add('show');
-    clearTimeout(toast._t);
-    toast._t = setTimeout(()=>{ el.classList.remove('show'); }, ms);
+  // ----------------------------
+  // Auth UI wiring (local profiles)
+  // ----------------------------
+  const $authModal = $('#auth-modal');
+  const $gate = $('#login-gate');
+
+  function openAuth() {
+    if ($authModal) $authModal.style.display = 'flex';
+    $('#auth-email')?.focus();
+  }
+  function closeAuth() {
+    if ($authModal) $authModal.style.display = 'none';
+    $('#auth-msg') && ($('#auth-msg').textContent = '');
   }
 
-;
+  function setAuthMsg(msg) {
+    const el = $('#auth-msg');
+    if (el) el.textContent = msg || '';
+  }
+
+  function updateAccountUI() {
+    const btn = $('#account-btn');
+    if (btn) btn.textContent = isSignedIn() ? currentLabel() : 'Sign in';
+  }
+
+  $('#account-btn')?.addEventListener('click', () => openAuth());
+  $('#auth-close')?.addEventListener('click', () => closeAuth());
+  $authModal?.addEventListener('click', (e) => { if (e.target === $authModal) closeAuth(); });
+
+  $('#auth-create')?.addEventListener('click', async () => {
+    try {
+      const email = $('#auth-email')?.value || '';
+      const pass = $('#auth-pass')?.value || '';
+      await createProfile(email, pass);
+      await signIn(email, pass);
+      location.reload();
+    } catch (err) {
+      setAuthMsg(err.message);
+    }
+  });
+
+  $('#auth-login')?.addEventListener('click', async () => {
+    try {
+      const email = $('#auth-email')?.value || '';
+      const pass = $('#auth-pass')?.value || '';
+      await signIn(email, pass);
+      location.reload();
+    } catch (err) {
+      setAuthMsg(err.message);
+    }
+  });
+
+  $('#auth-logout')?.addEventListener('click', () => {
+    signOut();
+    location.reload();
+  });
+
+  $('#gate-open-auth')?.addEventListener('click', () => openAuth());
+  $('#gate-continue-guest')?.addEventListener('click', () => {
+    continueGuest();
+    if ($gate) $gate.style.display = 'none';
+    startApp();
+  });
+
+  // Gate: require an explicit choice the first time on this device
+  if (!isSignedIn()) {
+    if ($gate) $gate.style.display = 'flex';
+    // Don't auto-start. User can sign in (reload) or continue as guest (starts).
+  } else {
+    startApp();
+  }
+
+})();
+
