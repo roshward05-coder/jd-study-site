@@ -209,8 +209,9 @@ button.danger:hover{background: rgba(255,77,109,0.18)}
 .card{
   border:1px solid var(--border);
   border-radius: var(--radius);
-  background: var(--panel2);
+  background: rgba(255,255,255,0.88);
   padding:14px;
+  color: #0b1220;
 }
 
 .list{display:flex; flex-direction:column; gap:8px; margin-top:10px}
@@ -219,7 +220,8 @@ button.danger:hover{background: rgba(255,77,109,0.18)}
   border:1px solid var(--border);
   border-radius:12px;
   padding:10px;
-  background: rgba(255,255,255,0.02);
+  background: rgba(255,255,255,0.88);
+  color: #0b1220;
   cursor:pointer;
 }
 .list .item:hover{background: rgba(255,255,255,0.05)}
@@ -256,7 +258,8 @@ button.danger:hover{background: rgba(255,77,109,0.18)}
   border:1px solid var(--border);
   border-radius:12px;
   padding:12px;
-  background: rgba(255,255,255,0.02);
+  background: rgba(255,255,255,0.88);
+  color: #0b1220;
   overflow:auto;
   white-space:pre-wrap;
   line-height:1.55;
@@ -273,7 +276,8 @@ mark.mark{
   border:1px solid var(--border);
   border-radius:12px;
   padding:10px;
-  background: rgba(255,255,255,0.02);
+  background: rgba(255,255,255,0.88);
+  color: #0b1220;
 }
 .bar{height:10px; border-radius:999px; background: rgba(255,255,255,0.08); overflow:hidden; margin-top:8px}
 .bar > div{height:100%; background: linear-gradient(90deg, rgba(255,20,147,0.9), rgba(255,182,193,0.75))}
@@ -318,7 +322,8 @@ mark.mark{
   border:1px solid var(--border);
   border-radius:12px;
   padding:10px;
-  background: rgba(255,255,255,0.02);
+  background: rgba(255,255,255,0.88);
+  color: #0b1220;
 }
 .month h4{margin:0 0 8px; font-size:13px; color:var(--muted)}
 .days{display:flex; flex-wrap:wrap; gap:4px}
@@ -328,7 +333,8 @@ mark.mark{
   border-radius:8px;
   padding:2px;
   overflow:hidden;
-  background: rgba(255,255,255,0.02);
+  background: rgba(255,255,255,0.88);
+  color: #0b1220;
 }
 .daylabel{font-size:11px; color:var(--muted)}
 .day-event{font-size:10px; margin-top:2px; color:var(--text); opacity:0.9}
