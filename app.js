@@ -709,14 +709,7 @@ $$('.nav-btn').forEach((btn) => {
     go(view);
   });
 });
-
-
-  // ----------------------------
-  // Theme toggle
-  // ----------------------------
-  $('#theme-toggle')?.addEventListener('click', () => {
-    document.body.classList.toggle('theme-light');
-    document.body.classList.toggle('theme-default');
+    
   });
 
   // ----------------------------
