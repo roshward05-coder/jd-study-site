@@ -127,14 +127,30 @@
 
         // Click: open item in the existing viewer panel
         div.addEventListener('click', async () => {
-          // Fill your viewer using cloud data:
-          $('#open-item-title').textContent = it.title || 'Untitled';
-          $('#open-item-meta').textContent = `${(it.type || '').toUpperCase()} • ${(it.tags || []).join(', ') || 'No tags'}`;
-          $('#doc-body').textContent = it.content_text || '';
+  // Update title + meta
+  $('#open-item-title').textContent = it.title || 'Untitled';
+  $('#open-item-meta').textContent =
+    `${(it.type || '').toUpperCase()} • ${(it.tags || []).join(', ') || 'No tags'}`;
 
-          // If it’s a PDF, you can optionally render it:
-          // await openCloudPdfInViewer(it);
-        });
+  // Always show extracted text (used for study/tests)
+  $('#doc-body').textContent = it.content_text || '';
+
+  // PDF present → open book-style viewer
+  if (it.storage_path) {
+    try {
+      const signedUrl = await cloudSignedUrl(it.storage_path);
+      await pdfOpenFromUrl(signedUrl);
+    } catch (err) {
+      console.error(err);
+      alert("Could not load PDF preview.");
+      pdfShow(false);
+    }
+  } else {
+    // Not a PDF → hide PDF viewer
+    pdfShow(false);
+  }
+});
+
 
         listEl.appendChild(div);
       });
@@ -247,6 +263,130 @@
   // If you already have a pdf.js viewer function, call it here.
   // Minimal pattern: open in new tab OR feed into pdfjsLib.getDocument({ url })
   // Example: window.open(url, "_blank");
+// ----------------------------
+// PDF Book Viewer (pdf.js)
+// ----------------------------
+let _pdfDoc = null;
+let _pdfUrlForTab = null;
+let _pdfPage = 1;      // left page number
+let _pdfScale = 1.1;
+
+function pdfShow(show) {
+  const v = document.getElementById("pdf-view");
+  if (v) v.style.display = show ? "block" : "none";
+}
+
+function pdfUpdateIndicator() {
+  const ind = document.getElementById("pdf-page-indicator");
+  if (!ind || !_pdfDoc) return;
+  const left = _pdfPage;
+  const right = _pdfPage + 1;
+  ind.textContent = `Pages ${left}${right <= _pdfDoc.numPages ? `–${right}` : ""} / ${_pdfDoc.numPages}`;
+}
+
+async function pdfRenderPageToCanvas(pageNum, canvasId) {
+  const canvas = document.getElementById(canvasId);
+  if (!canvas) return;
+
+  const ctx = canvas.getContext("2d");
+
+  // Blank if out of range
+  if (!_pdfDoc || pageNum < 1 || pageNum > _pdfDoc.numPages) {
+    canvas.width = 10; canvas.height = 10;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    return;
+  }
+
+  const page = await _pdfDoc.getPage(pageNum);
+  const viewport = page.getViewport({ scale: _pdfScale });
+
+  canvas.width = Math.floor(viewport.width);
+  canvas.height = Math.floor(viewport.height);
+
+  await page.render({ canvasContext: ctx, viewport }).promise;
+}
+
+async function pdfRenderSpread() {
+  if (!_pdfDoc) return;
+  pdfUpdateIndicator();
+  await pdfRenderPageToCanvas(_pdfPage, "pdf-canvas-left");
+  await pdfRenderPageToCanvas(_pdfPage + 1, "pdf-canvas-right");
+}
+
+async function pdfOpenFromUrl(url) {
+  if (!window.pdfjsLib) {
+    alert("pdf.js not loaded. Check your script tags.");
+    return;
+  }
+
+  // Worker (safety)
+  try {
+    pdfjsLib.GlobalWorkerOptions.workerSrc =
+      "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.14.305/pdf.worker.min.js";
+  } catch (_) {}
+
+  _pdfUrlForTab = url;
+  const loadingTask = pdfjsLib.getDocument({ url });
+  _pdfDoc = await loadingTask.promise;
+
+  // Start at page 1
+  _pdfPage = 1;
+  pdfShow(true);
+  await pdfRenderSpread();
+}
+
+async function pdfOpenFromFile(file) {
+  if (!window.pdfjsLib) {
+    alert("pdf.js not loaded. Check your script tags.");
+    return;
+  }
+
+  // Worker (safety)
+  try {
+    pdfjsLib.GlobalWorkerOptions.workerSrc =
+      "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.14.305/pdf.worker.min.js";
+  } catch (_) {}
+
+  const buf = await file.arrayBuffer();
+  _pdfUrlForTab = null;
+
+  const loadingTask = pdfjsLib.getDocument({ data: buf });
+  _pdfDoc = await loadingTask.promise;
+
+  _pdfPage = 1;
+  pdfShow(true);
+  await pdfRenderSpread();
+}
+
+// Controls
+document.getElementById("pdf-prev")?.addEventListener("click", async () => {
+  if (!_pdfDoc) return;
+  _pdfPage = Math.max(1, _pdfPage - 2);
+  await pdfRenderSpread();
+});
+
+document.getElementById("pdf-next")?.addEventListener("click", async () => {
+  if (!_pdfDoc) return;
+  _pdfPage = Math.min(_pdfDoc.numPages, _pdfPage + 2);
+  // keep left page odd for book feel
+  if (_pdfPage % 2 === 0) _pdfPage = Math.max(1, _pdfPage - 1);
+  await pdfRenderSpread();
+});
+
+document.getElementById("pdf-zoom")?.addEventListener("input", async (e) => {
+  const pct = parseInt(e.target.value, 10);
+  document.getElementById("pdf-zoom-label").textContent = `${pct}%`;
+  _pdfScale = pct / 100;
+  await pdfRenderSpread();
+});
+
+document.getElementById("pdf-open-new")?.addEventListener("click", async () => {
+  if (_pdfUrlForTab) {
+    window.open(_pdfUrlForTab, "_blank");
+    return;
+  }
+  alert("This PDF is not loaded from a URL. (It may be a local file.)");
+});
 
   // If your app uses pdf.js text extraction only (no visual rendering), do this:
   if (!window.pdfjsLib) {
