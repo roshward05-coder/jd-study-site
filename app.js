@@ -777,6 +777,53 @@ $$('.nav-btn').forEach((btn) => {
     refreshAll();
   });
 
+  $('#delete-unit')?.addEventListener('click', async () => {
+    if (units.length <= 1) {
+      return alert('Cannot delete the last unit. You must have at least one unit.');
+    }
+    
+    const currentUnit = units.find(u => u.id === activeUnitId);
+    if (!currentUnit) return;
+    
+    const confirmMsg = `Delete unit "${currentUnit.name}"? This will also delete:\n- All library items\n- All flashcard decks\n- All tasks\n- All timetable entries\n- All exam pack items\n\nThis action cannot be undone.`;
+    
+    if (!confirm(confirmMsg)) return;
+    
+    // Remove unit
+    units = units.filter(u => u.id !== activeUnitId);
+    
+    // Remove associated data
+    items = items.filter(item => item.unitId !== activeUnitId);
+    decks = decks.filter(deck => deck.unitId !== activeUnitId);
+    todos = todos.filter(todo => todo.unitId !== activeUnitId);
+    timetable = timetable.filter(tt => tt.unitId !== activeUnitId);
+    issues = issues.filter(issue => issue.unitId !== activeUnitId);
+    
+    // Remove mastery data for this unit
+    if (mastery[activeUnitId]) {
+      delete mastery[activeUnitId];
+    }
+    
+    // Save everything
+    save(KEY.UNITS, units);
+    save(KEY.ITEMS, items);
+    save(KEY.DECKS, decks);
+    save(KEY.TODOS, todos);
+    save(KEY.TT, timetable);
+    save(KEY.ISSUES, issues);
+    save(KEY.MASTERY, mastery);
+    
+    // Switch to first remaining unit
+    activeUnitId = units[0].id;
+    
+    // Refresh UI
+    renderUnitSelect();
+    await cloudLoadAll();
+    refreshAll();
+    
+    toast(`Unit "${currentUnit.name}" deleted successfully.`);
+  });
+
   // ----------------------------
   // Library: adding / uploading (LOCAL MVP)
   // ----------------------------
