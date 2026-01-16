@@ -69,7 +69,12 @@
         <button data-view="settings" class="nav-btn">Settings</button>
       </nav>
       <div class="nav-controls">
-        <select id="active-unit"></select>
+        <div class="unit-controls">
+          <select id="active-unit"></select>
+          <input id="new-unit-input" placeholder="Add unit (e.g., Contracts)">
+          <button id="add-unit" class="secondary">Add</button>
+          <button id="delete-unit" class="danger">Delete</button>
+        </div>
         <div class="stats">
           <div class="stat">
             <span class="k" id="stat-items">0</span>
