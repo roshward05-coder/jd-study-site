@@ -55,24 +55,40 @@
       </div>
     </header>
 
-    <div class="layout">
-      <aside class="sidebar">
-        <div class="row between" style="margin-bottom:10px">
-          <button id="sidebar-toggle" class="ghost" title="Minimize sidebar">◀</button>
+    <div class="horizontal-nav">
+      <nav class="nav">
+        <button data-view="units" class="nav-btn active">Units</button>
+        <button data-view="library" class="nav-btn">Library</button>
+        <button data-view="learn" class="nav-btn">Learn</button>
+        <button data-view="flashcards" class="nav-btn">Flashcards</button>
+        <button data-view="tests" class="nav-btn">Tests</button>
+        <button data-view="citations" class="nav-btn">AGLC4 Citations</button>
+        <button data-view="timetable" class="nav-btn">Timetable</button>
+        <button data-view="tasks" class="nav-btn">To‑Do</button>
+        <button data-view="exampack" class="nav-btn">Exam Pack</button>
+        <button data-view="settings" class="nav-btn">Settings</button>
+      </nav>
+      <div class="nav-controls">
+        <select id="active-unit"></select>
+        <div class="stats">
+          <div class="stat">
+            <span class="k" id="stat-items">0</span>
+            <span class="v">Items</span>
+          </div>
+          <div class="stat">
+            <span class="k" id="stat-due">0</span>
+            <span class="v">Due</span>
+          </div>
+          <div class="stat">
+            <span class="k" id="stat-streak">0</span>
+            <span class="v">Streak</span>
+          </div>
         </div>
-        <nav class="nav">
-          <button data-view="units" class="nav-btn active">Units</button>
-          <button data-view="library" class="nav-btn">Library</button>
-          <button data-view="learn" class="nav-btn">Learn</button>
-          <button data-view="flashcards" class="nav-btn">Flashcards</button>
-          <button data-view="tests" class="nav-btn">Tests</button>
-          <button data-view="citations" class="nav-btn">AGLC4 Citations</button>
-          <button data-view="timetable" class="nav-btn">Timetable</button>
-          <button data-view="tasks" class="nav-btn">To‑Do</button>
-          <button data-view="exampack" class="nav-btn">Exam Pack</button>
-          <button data-view="settings" class="nav-btn">Settings</button>
-        </nav>
+      </div>
+    </div>
 
+    <div class="layout">
+      <aside class="sidebar" style="display:none">
         <div class="unit-switcher">
           <label class="label">Current unit</label>
           <select id="active-unit"></select>
