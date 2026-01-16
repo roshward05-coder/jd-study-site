@@ -998,8 +998,24 @@ $$('.nav-btn').forEach((btn) => {
   $('#open-item-meta').textContent =
     `${(it.type || 'note').toUpperCase()} • ${(it.tags || []).join(', ') || 'No tags'} • ${new Date(it.created).toLocaleString()}`;
 
+  // Show/hide view mode toggle for PDF items
+  const viewModeToggle = $('#view-mode-toggle');
+  const isPdf = it._cloud && it.storage_path && it.storage_path.toLowerCase().endsWith('.pdf');
+  if (viewModeToggle) {
+    viewModeToggle.style.display = isPdf ? 'flex' : 'none';
+  }
+  
+  // Default to text view
+  const body = $('#doc-body');
+  body.style.display = 'block';
+  body.textContent = it.content || '';
+  pdfShow(false);
+  
+  // Update toggle button states
+  $('#view-as-text')?.classList.add('active');
+  $('#view-as-pdf')?.classList.remove('active');
+
   // IMPORTANT: use content not content_text here; we normalized it
-  $('#doc-body').textContent = it.content || '';
   $('#summary').textContent = '—';
   $('#concepts').innerHTML = '';
 }
@@ -1151,6 +1167,44 @@ $('#filter-tag')?.addEventListener('change', rerenderLibrarySmart);
     save(KEY.ITEMS, items);
     renderLibrary();
     renderPackList();
+  });
+
+  // View mode toggle for PDF/Text
+  $('#view-as-pdf')?.addEventListener('click', async () => {
+    if (!openItemId) return;
+    let it = items.find((x) => x.id === openItemId);
+    if (!it && cloudCache.byId?.has(openItemId)) {
+      it = rowToLocalShape(cloudCache.byId.get(openItemId));
+    }
+    if (!it || !it._cloud || !it.storage_path) return;
+    
+    // Show PDF view, hide text view
+    $('#doc-body').style.display = 'none';
+    await openCloudPdfInViewer(it);
+    
+    // Update button states
+    $('#view-as-pdf')?.classList.add('active');
+    $('#view-as-text')?.classList.remove('active');
+  });
+
+  $('#view-as-text')?.addEventListener('click', () => {
+    if (!openItemId) return;
+    let it = items.find((x) => x.id === openItemId);
+    if (!it && cloudCache.byId?.has(openItemId)) {
+      it = rowToLocalShape(cloudCache.byId.get(openItemId));
+    }
+    if (!it) return;
+    
+    // Show text view, hide PDF view
+    pdfShow(false);
+    const body = $('#doc-body');
+    body.style.display = 'block';
+    body.innerHTML = '';
+    body.textContent = it.content || '';
+    
+    // Update button states
+    $('#view-as-text')?.classList.add('active');
+    $('#view-as-pdf')?.classList.remove('active');
   });
 
   // ----------------------------
