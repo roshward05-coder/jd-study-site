@@ -1597,6 +1597,19 @@ $('#filter-tag')?.addEventListener('change', rerenderLibrarySmart);
     renderSkills();
   }
 
+  // Learn page controls
+  $('#refresh-skills')?.addEventListener('click', () => {
+    renderSkills();
+    toast('Skills refreshed');
+  });
+
+  $('#clear-learn-session')?.addEventListener('click', () => {
+    const session = $('#learn-session');
+    if (session) {
+      session.innerHTML = '<div class="muted small">Select a skill and start a practice quiz to begin.</div>';
+    }
+  });
+
   // ----------------------------
   // Tests: generate MCQ / short / cloze
   // ----------------------------
