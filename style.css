@@ -311,8 +311,12 @@ button.danger:hover{background: rgba(255,77,109,0.18)}
   padding:14px;
   box-shadow: var(--shadow);
   color: #0b1220;
+  height: calc(100vh - 173px);
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
 }
-.view-head{margin-bottom:10px}
+.view-head{margin-bottom:10px; flex-shrink: 0;}
 .view-head h2{margin:0 0 6px}
 .muted{color:var(--muted)}
 .small{font-size:12px}
@@ -326,13 +330,16 @@ button.danger:hover{background: rgba(255,77,109,0.18)}
   color: #0b1220;
 }
 
-.grid{display:grid; gap:14px}
-.grid.two{grid-template-columns: 1fr 1fr}
+.grid{display:grid; gap:14px; flex: 1;}
+.grid.two{grid-template-columns: 1fr 1fr; height: 100%;}
 .card{
   border:1px solid var(--border);
   border-radius: var(--radius);
-  background: var(--panel2);
+  background: rgba(255,255,255,0.88);
   padding:14px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
 .list{display:flex; flex-direction:column; gap:8px; margin-top:10px}
@@ -401,17 +408,6 @@ mark.mark{
 .bar > div{height:100%; background: linear-gradient(90deg, rgba(255,20,147,0.9), rgba(255,182,193,0.75))}
 
 /* Learn page specific layout */
-#view-learn .grid.two{
-  max-height: calc(100vh - 150px);
-}
-#view-learn .card{
-  display: flex;
-  flex-direction: column;
-  height: calc(100vh - 150px);
-  max-height: calc(100vh - 150px);
-  overflow: hidden;
-  background: rgba(255,255,255,0.88);
-}
 #view-learn .card h3{
   margin: 0 0 10px 0;
   flex-shrink: 0;
