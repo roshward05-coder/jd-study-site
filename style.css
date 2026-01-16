@@ -333,14 +333,11 @@ mark.mark{
 .bar > div{height:100%; background: linear-gradient(90deg, rgba(255,20,147,0.9), rgba(255,182,193,0.75))}
 
 /* Learn page specific layout */
-#view-learn .grid.two{
-  grid-template-columns: 1fr 1fr;
-  max-height: calc(100vh - 180px);
-}
 #view-learn .card{
   display: flex;
   flex-direction: column;
-  max-height: calc(100vh - 180px);
+  max-height: calc(100vh - 200px);
+  overflow: hidden;
 }
 #view-learn .card h3{
   margin: 0 0 10px 0;
@@ -355,7 +352,6 @@ mark.mark{
   flex: 1;
   overflow-y: auto;
   min-height: 0;
-  max-height: calc(100vh - 320px);
 }
 
 /* Flashcards */
