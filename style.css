@@ -302,26 +302,50 @@ mark.mark{
 .bar > div{height:100%; background: linear-gradient(90deg, rgba(255,20,147,0.9), rgba(255,182,193,0.75))}
 
 /* Learn page specific layout */
-#view-learn .grid.two{
-  grid-template-columns: 1fr 1fr;
-  align-items: start;
-}
-#view-learn .card{
-  height: calc(100vh - 180px);
-  max-height: 800px;
+#view-learn{
+  height: calc(100vh - 100px);
+  overflow: hidden;
   display: flex;
   flex-direction: column;
 }
+#view-learn .view-head{
+  margin-bottom: 10px;
+  flex-shrink: 0;
+}
+#view-learn .grid.two{
+  grid-template-columns: 1fr 1fr;
+  align-items: stretch;
+  flex: 1;
+  height: 100%;
+  overflow: hidden;
+}
+#view-learn .card{
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+#view-learn .card h3{
+  margin: 0 0 10px 0;
+  flex-shrink: 0;
+}
+#view-learn .card .row{
+  flex-shrink: 0;
+}
+#view-learn .card .divider{
+  flex-shrink: 0;
+}
+#view-learn .card .muted.small{
+  flex-shrink: 0;
+}
 #view-learn .skills{
   flex: 1;
-  max-height: calc(100vh - 380px);
   overflow-y: auto;
   margin-top: 0;
 }
 #view-learn #learn-session.panel{
   flex: 1;
   overflow-y: auto;
-  max-height: calc(100vh - 420px);
 }
 
 /* Flashcards */
@@ -388,12 +412,16 @@ mark.mark{
   .month{width:calc(50% - 12px)}
   
   /* Keep Learn page cards side-by-side on tablets */
+  #view-learn{
+    height: auto;
+    overflow: visible;
+  }
   #view-learn .grid.two{
     grid-template-columns: 1fr 1fr;
+    height: auto;
   }
   #view-learn .card{
-    height: auto;
-    min-height: 400px;
+    height: 500px;
   }
 }
 @media (max-width: 560px){
@@ -404,7 +432,6 @@ mark.mark{
     grid-template-columns: 1fr;
   }
   #view-learn .card{
-    height: auto;
-    min-height: 300px;
+    height: 400px;
   }
 }
