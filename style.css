@@ -233,6 +233,10 @@ button.secondary{
   background: rgba(255,20,147,0.12);
 }
 button.secondary:hover{background: rgba(255,20,147,0.18)}
+button.secondary.active{
+  background: rgba(255,20,147,0.25);
+  border-color: rgba(255,20,147,0.4);
+}
 button.ghost{
   border-color: var(--border);
   background: transparent;
