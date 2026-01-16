@@ -746,6 +746,19 @@ $$('.nav-btn').forEach((btn) => {
   });
 
   // ----------------------------
+  // Sidebar toggle
+  // ----------------------------
+  $('#sidebar-toggle')?.addEventListener('click', () => {
+    const sidebar = $('.sidebar');
+    const toggle = $('#sidebar-toggle');
+    if (sidebar && toggle) {
+      sidebar.classList.toggle('minimized');
+      toggle.textContent = sidebar.classList.contains('minimized') ? '▶' : '◀';
+      toggle.title = sidebar.classList.contains('minimized') ? 'Expand sidebar' : 'Minimize sidebar';
+    }
+  });
+
+  // ----------------------------
   // Units
   // ----------------------------
   function ensureDefaultUnit() {
