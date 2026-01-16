@@ -333,10 +333,14 @@ mark.mark{
 .bar > div{height:100%; background: linear-gradient(90deg, rgba(255,20,147,0.9), rgba(255,182,193,0.75))}
 
 /* Learn page specific layout */
+#view-learn .grid.two{
+  max-height: calc(100vh - 150px);
+}
 #view-learn .card{
   display: flex;
   flex-direction: column;
-  max-height: calc(100vh - 200px);
+  height: calc(100vh - 150px);
+  max-height: calc(100vh - 150px);
   overflow: hidden;
   background: rgba(255,255,255,0.88);
 }
