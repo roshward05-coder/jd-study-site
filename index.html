@@ -242,24 +242,35 @@
         <section id="view-learn" class="view" style="display:none">
           <div class="view-head">
             <h2>Learn</h2>
-            <div class="muted">A skills test: topics (tags) become skills, and your quizzes raise mastery.</div>
+            <div class="muted">Track your skill mastery by topic. Practice quizzes boost your understanding and retention.</div>
           </div>
 
           <div class="grid two">
             <div class="card">
-              <h3>Skills for this unit</h3>
+              <div class="row between">
+                <h3>Skills by topic</h3>
+                <button id="refresh-skills" class="ghost">Refresh</button>
+              </div>
+              <div class="muted small" style="margin-bottom:10px">Skills are auto-generated from your library item tags. Quiz performance increases mastery.</div>
               <div id="skills" class="skills"></div>
             </div>
 
             <div class="card">
-              <h3>Practice</h3>
+              <h3>Practice session</h3>
               <div class="row gap wrap">
-                <select id="practice-skill"><option value="">Choose a skill/topic</option></select>
-                <button id="start-skill-quiz">Start practice quiz</button>
+                <label class="label" style="min-width:100px">Select skill</label>
+                <select id="practice-skill" style="flex:1"><option value="">Choose a skill/topic</option></select>
               </div>
-              <div class="muted small" style="margin-top:8px">Practice quizzes are generated from your tagged library items.</div>
+              <div class="row gap wrap" style="margin-top:10px">
+                <button id="start-skill-quiz">Start practice quiz</button>
+                <button id="clear-learn-session" class="ghost">Clear session</button>
+              </div>
+              
               <div class="divider"></div>
-              <div id="learn-session" class="panel">—</div>
+              
+              <div id="learn-session" class="panel">
+                <div class="muted small">Select a skill and start a practice quiz to begin.</div>
+              </div>
             </div>
           </div>
         </section>
