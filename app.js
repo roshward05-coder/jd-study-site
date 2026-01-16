@@ -134,10 +134,27 @@
             <div class="row gap">
               <span class="badge">${escapeHtml(it.type || 'note')}</span>
               ${it.storage_path ? '<span class="pill">PDF</span>' : ''}
+              <button class="danger ghost" style="padding:4px 8px; font-size:11px" data-delete-id="${it.id}">Delete</button>
             </div>
           </div>
           <div class="muted small" style="margin-top:6px">${tagsHtml || '<span class="muted small">No tags</span>'}</div>
         `;
+
+        // Delete button handler
+        const deleteBtn = div.querySelector('[data-delete-id]');
+        deleteBtn?.addEventListener('click', async (e) => {
+          e.stopPropagation(); // Don't trigger item open
+          if (!confirm(`Delete "${it.title || 'Untitled'}"?`)) return;
+          
+          try {
+            await cloudDeleteLibraryItem(it.id, it.storage_path);
+            await cloudLoadAll(); // Refresh list
+            toast(`Item "${it.title || 'Untitled'}" deleted.`);
+          } catch (err) {
+            console.error(err);
+            alert('Failed to delete item.');
+          }
+        });
 
         // Click: open item in the existing viewer panel
         div.addEventListener('click', async () => {
@@ -1003,10 +1020,33 @@ $$('.nav-btn').forEach((btn) => {
       div.innerHTML = `
         <div class="row between">
           <strong>${escapeHtml(it.title)}</strong>
-          <div class="row gap">${pin}<span class="badge">${escapeHtml(it.type)}</span></div>
+          <div class="row gap">${pin}<span class="badge">${escapeHtml(it.type)}</span><button class="danger ghost" style="padding:4px 8px; font-size:11px" data-delete-id="${it.id}">Delete</button></div>
         </div>
         <div class="muted small" style="margin-top:6px">${tags || '<span class="muted small">No tags</span>'}</div>
       `;
+
+      // Delete button handler
+      const deleteBtn = div.querySelector('[data-delete-id]');
+      deleteBtn?.addEventListener('click', (e) => {
+        e.stopPropagation(); // Don't trigger item open
+        if (!confirm(`Delete "${it.title}"?`)) return;
+        
+        items = items.filter(i => i.id !== it.id);
+        save(KEY.ITEMS, items);
+        renderLibrary();
+        renderStats();
+        
+        // Clear open item if it was deleted
+        if (openItemId === it.id) {
+          openItemId = null;
+          $('#doc-body').textContent = '';
+          $('#open-item-title').textContent = 'Select an item';
+          $('#open-item-meta').textContent = '';
+          pdfShow(false);
+        }
+        
+        toast(`Item "${it.title}" deleted.`);
+      });
 
       div.addEventListener('click', () => {
         openLibraryItem(it.id);
