@@ -301,6 +301,19 @@ mark.mark{
 .bar{height:10px; border-radius:999px; background: rgba(255,255,255,0.08); overflow:hidden; margin-top:8px}
 .bar > div{height:100%; background: linear-gradient(90deg, rgba(255,20,147,0.9), rgba(255,182,193,0.75))}
 
+/* Learn page specific layout */
+#view-learn .grid.two{
+  grid-template-columns: 1fr 1fr;
+  align-items: start;
+}
+#view-learn .card{
+  min-height: 400px;
+}
+#view-learn .skills{
+  max-height: 450px;
+  overflow-y: auto;
+}
+
 /* Flashcards */
 .flashcard{border:1px dashed rgba(255,20,147,0.35); border-radius: var(--radius); padding:14px; background: rgba(255,255,255,0.88); color:#0b1220}
 .card-face{
@@ -363,7 +376,17 @@ mark.mark{
   .grid.two{grid-template-columns:1fr}
   .search input{width:min(520px, 88vw)}
   .month{width:calc(50% - 12px)}
+  
+  /* Keep Learn page cards side-by-side on tablets */
+  #view-learn .grid.two{
+    grid-template-columns: 1fr 1fr;
+  }
 }
 @media (max-width: 560px){
   .month{width:100%}
+  
+  /* Stack Learn page cards only on mobile */
+  #view-learn .grid.two{
+    grid-template-columns: 1fr;
+  }
 }
