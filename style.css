@@ -97,6 +97,21 @@ code{font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Libera
   align-items:center;
   gap:14px;
 }
+.horizontal-nav .unit-controls{
+  display:flex;
+  align-items:center;
+  gap:8px;
+}
+.horizontal-nav .unit-controls input{
+  min-width:180px;
+  width:auto;
+  padding:8px 10px;
+  background: rgba(255,255,255,0.95);
+}
+.horizontal-nav .unit-controls button{
+  padding:8px 12px;
+  white-space:nowrap;
+}
 .horizontal-nav select{
   min-width:150px;
   width:auto;
