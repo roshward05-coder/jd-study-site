@@ -307,11 +307,21 @@ mark.mark{
   align-items: start;
 }
 #view-learn .card{
-  min-height: 400px;
+  height: calc(100vh - 180px);
+  max-height: 800px;
+  display: flex;
+  flex-direction: column;
 }
 #view-learn .skills{
-  max-height: 450px;
+  flex: 1;
+  max-height: calc(100vh - 380px);
   overflow-y: auto;
+  margin-top: 0;
+}
+#view-learn #learn-session.panel{
+  flex: 1;
+  overflow-y: auto;
+  max-height: calc(100vh - 420px);
 }
 
 /* Flashcards */
@@ -381,6 +391,10 @@ mark.mark{
   #view-learn .grid.two{
     grid-template-columns: 1fr 1fr;
   }
+  #view-learn .card{
+    height: auto;
+    min-height: 400px;
+  }
 }
 @media (max-width: 560px){
   .month{width:100%}
@@ -388,5 +402,9 @@ mark.mark{
   /* Stack Learn page cards only on mobile */
   #view-learn .grid.two{
     grid-template-columns: 1fr;
+  }
+  #view-learn .card{
+    height: auto;
+    min-height: 300px;
   }
 }
