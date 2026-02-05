@@ -242,7 +242,8 @@
     MASTERY: 'jdh_mastery',
     STREAK: 'jdh_streak',
     SELECTED_FOR_TEST: 'jdh_selected_for_test',
-    CITATIONS: 'jdh_citations'
+    CITATIONS: 'jdh_citations',
+    NOTES: 'jdh_notes'
   };
 
   const VERSION = 2;
@@ -660,9 +661,11 @@ async function unitItemsSmart() {
   let selectedForTest = load(KEY.SELECTED_FOR_TEST, []);
 
   let citations = load(KEY.CITATIONS, []);
+  let notes = load(KEY.NOTES, []);
 
   let activeUnitId = null;
   let openItemId = null;
+  let openNoteId = null;
 
   // ----------------------------
   // Router / navigation
@@ -670,6 +673,7 @@ async function unitItemsSmart() {
   const views = {
     units: $('#view-units'),
     library: $('#view-library'),
+    notes: $('#view-notes'),
     learn: $('#view-learn'),
     flashcards: $('#view-flashcards'),
     tests: $('#view-tests'),
@@ -697,6 +701,7 @@ async function unitItemsSmart() {
 // ----------------------------
 const PRIVATE_VIEWS = new Set([
   'library',
+  'notes',
   'learn',
   'flashcards',
   'tests',
@@ -790,6 +795,7 @@ $$('.nav-btn').forEach((btn) => {
   $('#active-unit')?.addEventListener('change', (e) => {
     activeUnitId = e.target.value;
     openItemId = null;
+    openNoteId = null;
     selectedForTest = [];
     save(KEY.SELECTED_FOR_TEST, selectedForTest);
     refreshAll();
@@ -828,6 +834,7 @@ $$('.nav-btn').forEach((btn) => {
     todos = todos.filter(todo => todo.unitId !== activeUnitId);
     timetable = timetable.filter(tt => tt.unitId !== activeUnitId);
     issues = issues.filter(issue => issue.unitId !== activeUnitId);
+    notes = notes.filter(note => note.unitId !== activeUnitId);
     
     // Remove mastery data for this unit
     if (mastery[activeUnitId]) {
@@ -842,6 +849,7 @@ $$('.nav-btn').forEach((btn) => {
     save(KEY.TT, timetable);
     save(KEY.ISSUES, issues);
     save(KEY.MASTERY, mastery);
+    save(KEY.NOTES, notes);
     
     // Switch to first remaining unit
     activeUnitId = units[0].id;
@@ -1206,6 +1214,119 @@ $('#filter-tag')?.addEventListener('change', rerenderLibrarySmart);
     $('#view-as-text')?.classList.add('active');
     $('#view-as-pdf')?.classList.remove('active');
   });
+
+  // ----------------------------
+  // Notes
+  // ----------------------------
+  function unitNotes() {
+    return notes.filter((n) => n.unitId === activeUnitId);
+  }
+
+  function openNote(id) {
+    const note = notes.find((n) => n.id === id);
+    if (!note) return;
+    openNoteId = note.id;
+    const titleEl = $('#open-note-title');
+    const bodyEl = $('#open-note-body');
+    if (titleEl) titleEl.value = note.title || '';
+    if (bodyEl) bodyEl.value = note.content || '';
+    const meta = $('#note-meta');
+    if (meta) {
+      meta.textContent = `Updated ${new Date(note.updated || note.created).toLocaleString()}`;
+    }
+  }
+
+  function renderNotesList() {
+    const list = $('#notes-list');
+    if (!list) return;
+    const data = unitNotes().slice().sort((a, b) => (b.updated || b.created) - (a.updated || a.created));
+    list.innerHTML = '';
+    if (openNoteId && !notes.find((n) => n.id === openNoteId)) {
+      openNoteId = null;
+      const titleEl = $('#open-note-title');
+      const bodyEl = $('#open-note-body');
+      if (titleEl) titleEl.value = '';
+      if (bodyEl) bodyEl.value = '';
+      const meta = $('#note-meta');
+      if (meta) meta.textContent = '—';
+    }
+    if (!data.length) {
+      list.innerHTML = '<div class="muted small">No notes yet. Create one above.</div>';
+      return;
+    }
+    data.forEach((note) => {
+      const item = document.createElement('div');
+      item.className = 'item';
+      item.dataset.id = note.id;
+      const preview = (note.content || '').slice(0, 80);
+      const suffix = (note.content || '').length > 80 ? '…' : '';
+      item.innerHTML = `
+        <div class="row between">
+          <strong>${escapeHtml(note.title || 'Untitled')}</strong>
+          <span class="muted small">${new Date(note.updated || note.created).toLocaleDateString()}</span>
+        </div>
+        <div class="muted small">${escapeHtml(preview)}${suffix}</div>
+      `;
+      item.addEventListener('click', () => openNote(note.id));
+      list.appendChild(item);
+    });
+    if (!openNoteId && data[0]) openNote(data[0].id);
+  }
+
+  function saveOpenNote() {
+    if (!openNoteId) return;
+    const note = notes.find((n) => n.id === openNoteId);
+    if (!note) return;
+    const titleEl = $('#open-note-title');
+    const bodyEl = $('#open-note-body');
+    note.title = (titleEl?.value || '').trim() || 'Untitled';
+    note.content = bodyEl?.value || '';
+    note.updated = now();
+    save(KEY.NOTES, notes);
+    renderNotesList();
+    const meta = $('#note-meta');
+    if (meta) meta.textContent = `Updated ${new Date(note.updated).toLocaleString()}`;
+  }
+
+  $('#add-note')?.addEventListener('click', () => {
+    const titleInput = $('#note-title');
+    const title = (titleInput?.value || '').trim() || 'Untitled';
+    const note = {
+      id: uid(),
+      unitId: activeUnitId,
+      title,
+      content: '',
+      created: now(),
+      updated: now()
+    };
+    notes.unshift(note);
+    save(KEY.NOTES, notes);
+    if (titleInput) titleInput.value = '';
+    renderNotesList();
+    openNote(note.id);
+  });
+
+  $('#save-note')?.addEventListener('click', saveOpenNote);
+
+  $('#delete-note')?.addEventListener('click', () => {
+    if (!openNoteId) return;
+    const note = notes.find((n) => n.id === openNoteId);
+    if (!note) return;
+    if (!confirm(`Delete note "${note.title || 'Untitled'}"?`)) return;
+    notes = notes.filter((n) => n.id !== openNoteId);
+    save(KEY.NOTES, notes);
+    openNoteId = null;
+    renderNotesList();
+    const titleEl = $('#open-note-title');
+    const bodyEl = $('#open-note-body');
+    if (titleEl) titleEl.value = '';
+    if (bodyEl) bodyEl.value = '';
+    const meta = $('#note-meta');
+    if (meta) meta.textContent = '—';
+  });
+
+  $('#open-note-title')?.addEventListener('input', saveOpenNote);
+  $('#open-note-body')?.addEventListener('input', saveOpenNote);
 
   // ----------------------------
   // Summariser + concept extractor
@@ -2542,6 +2663,7 @@ $('#filter-tag')?.addEventListener('change', rerenderLibrarySmart);
     streak = load(KEY.STREAK, streak);
     selectedForTest = load(KEY.SELECTED_FOR_TEST, selectedForTest);
     citations = load(KEY.CITATIONS, citations);
+    notes = load(KEY.NOTES, notes);
 
     ensureDefaultUnit();
     ensureDefaultDeck();
@@ -2565,6 +2687,8 @@ $('#filter-tag')?.addEventListener('change', rerenderLibrarySmart);
     renderTodos();
     renderIssues();
     renderPackList();
+
+    renderNotesList();
 
     renderStats();
     renderTestBuilderUI();
