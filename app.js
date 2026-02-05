@@ -1222,6 +1222,37 @@ $('#filter-tag')?.addEventListener('change', rerenderLibrarySmart);
     return notes.filter((n) => n.unitId === activeUnitId);
   }
 
+  function renderNoteFilters() {
+    const notebookSel = $('#note-notebook');
+    const sectionSel = $('#note-section');
+    if (!notebookSel || !sectionSel) return;
+
+    const data = unitNotes();
+    const notebooks = new Set(data.map((n) => n.notebook || 'General'));
+    if (!notebooks.size) notebooks.add('General');
+
+    const currentNotebook = notebookSel.value || 'General';
+    notebookSel.innerHTML = Array.from(notebooks)
+      .sort((a, b) => a.localeCompare(b))
+      .map((n) => `<option value="${escapeHtml(n)}">${escapeHtml(n)}</option>`)
+      .join('');
+    notebookSel.value = notebooks.has(currentNotebook) ? currentNotebook : 'General';
+
+    const sections = new Set(
+      data
+        .filter((n) => (n.notebook || 'General') === notebookSel.value)
+        .map((n) => n.section || 'General')
+    );
+    if (!sections.size) sections.add('General');
+
+    const currentSection = sectionSel.value || 'General';
+    sectionSel.innerHTML = Array.from(sections)
+      .sort((a, b) => a.localeCompare(b))
+      .map((s) => `<option value="${escapeHtml(s)}">${escapeHtml(s)}</option>`)
+      .join('');
+    sectionSel.value = sections.has(currentSection) ? currentSection : 'General';
+  }
+
   function openNote(id) {
     const note = notes.find((n) => n.id === id);
     if (!note) return;
@@ -1229,7 +1260,7 @@ $('#filter-tag')?.addEventListener('change', rerenderLibrarySmart);
     const titleEl = $('#open-note-title');
     const bodyEl = $('#open-note-body');
     if (titleEl) titleEl.value = note.title || '';
-    if (bodyEl) bodyEl.value = note.content || '';
+    if (bodyEl) bodyEl.innerHTML = note.content || '';
     const meta = $('#note-meta');
     if (meta) {
       meta.textContent = `Updated ${new Date(note.updated || note.created).toLocaleString()}`;
@@ -1239,14 +1270,20 @@ $('#filter-tag')?.addEventListener('change', rerenderLibrarySmart);
   function renderNotesList() {
     const list = $('#notes-list');
     if (!list) return;
-    const data = unitNotes().slice().sort((a, b) => (b.updated || b.created) - (a.updated || a.created));
+    const notebook = $('#note-notebook')?.value || 'General';
+    const section = $('#note-section')?.value || 'General';
+    const data = unitNotes()
+      .filter((n) => (n.notebook || 'General') === notebook)
+      .filter((n) => (n.section || 'General') === section)
+      .slice()
+      .sort((a, b) => (b.updated || b.created) - (a.updated || a.created));
     list.innerHTML = '';
     if (openNoteId && !notes.find((n) => n.id === openNoteId)) {
       openNoteId = null;
       const titleEl = $('#open-note-title');
       const bodyEl = $('#open-note-body');
       if (titleEl) titleEl.value = '';
-      if (bodyEl) bodyEl.value = '';
+      if (bodyEl) bodyEl.innerHTML = '';
       const meta = $('#note-meta');
       if (meta) meta.textContent = '—';
     }
@@ -1279,10 +1316,15 @@ $('#filter-tag')?.addEventListener('change', rerenderLibrarySmart);
     if (!note) return;
     const titleEl = $('#open-note-title');
     const bodyEl = $('#open-note-body');
+    const notebookSel = $('#note-notebook');
+    const sectionSel = $('#note-section');
     note.title = (titleEl?.value || '').trim() || 'Untitled';
-    note.content = bodyEl?.value || '';
+    note.content = bodyEl?.innerHTML || '';
+    note.notebook = notebookSel?.value || 'General';
+    note.section = sectionSel?.value || 'General';
     note.updated = now();
     save(KEY.NOTES, notes);
+    renderNoteFilters();
     renderNotesList();
     const meta = $('#note-meta');
     if (meta) meta.textContent = `Updated ${new Date(note.updated).toLocaleString()}`;
@@ -1290,20 +1332,60 @@ $('#filter-tag')?.addEventListener('change', rerenderLibrarySmart);
 
   $('#add-note')?.addEventListener('click', () => {
     const titleInput = $('#note-title');
+    const notebookSel = $('#note-notebook');
+    const sectionSel = $('#note-section');
     const title = (titleInput?.value || '').trim() || 'Untitled';
     const note = {
       id: uid(),
       unitId: activeUnitId,
       title,
       content: '',
+      notebook: notebookSel?.value || 'General',
+      section: sectionSel?.value || 'General',
       created: now(),
       updated: now()
     };
     notes.unshift(note);
     save(KEY.NOTES, notes);
     if (titleInput) titleInput.value = '';
+    renderNoteFilters();
     renderNotesList();
     openNote(note.id);
+  });
+
+  $('#add-notebook')?.addEventListener('click', () => {
+    const input = $('#new-notebook');
+    const name = (input?.value || '').trim();
+    if (!name) return;
+    const notebookSel = $('#note-notebook');
+    if (notebookSel) {
+      notebookSel.value = name;
+    }
+    if (input) input.value = '';
+    renderNoteFilters();
+    renderNotesList();
+  });
+
+  $('#add-section')?.addEventListener('click', () => {
+    const input = $('#new-section');
+    const name = (input?.value || '').trim();
+    if (!name) return;
+    const sectionSel = $('#note-section');
+    if (sectionSel) {
+      sectionSel.value = name;
+    }
+    if (input) input.value = '';
+    renderNoteFilters();
+    renderNotesList();
+  });
+
+  $('#note-notebook')?.addEventListener('change', () => {
+    renderNoteFilters();
+    renderNotesList();
+  });
+
+  $('#note-section')?.addEventListener('change', () => {
+    renderNotesList();
   });
 
   $('#save-note')?.addEventListener('click', saveOpenNote);
@@ -1320,13 +1402,27 @@ $('#filter-tag')?.addEventListener('change', rerenderLibrarySmart);
     const titleEl = $('#open-note-title');
     const bodyEl = $('#open-note-body');
     if (titleEl) titleEl.value = '';
-    if (bodyEl) bodyEl.value = '';
+    if (bodyEl) bodyEl.innerHTML = '';
     const meta = $('#note-meta');
     if (meta) meta.textContent = '—';
   });
 
   $('#open-note-title')?.addEventListener('input', saveOpenNote);
   $('#open-note-body')?.addEventListener('input', saveOpenNote);
+
+  // Notes rich editor toolbar
+  $('#notes-bold')?.addEventListener('click', () => {
+    document.execCommand('bold');
+    $('#open-note-body')?.focus();
+  });
+  $('#notes-italic')?.addEventListener('click', () => {
+    document.execCommand('italic');
+    $('#open-note-body')?.focus();
+  });
+  $('#notes-bullets')?.addEventListener('click', () => {
+    document.execCommand('insertUnorderedList');
+    $('#open-note-body')?.focus();
+  });
 
   // ----------------------------
   // Summariser + concept extractor
@@ -2688,6 +2784,7 @@ $('#filter-tag')?.addEventListener('change', rerenderLibrarySmart);
     renderIssues();
     renderPackList();
 
+    renderNoteFilters();
     renderNotesList();
 
     renderStats();
