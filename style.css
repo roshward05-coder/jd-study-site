@@ -191,6 +191,7 @@ code{font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Libera
 .nav-btn.active{border-color: rgba(255,20,147,0.55); background: rgba(255,20,147,0.06)}
 .nav-btn[data-view="units"]::before{content:"📚 "}
 .nav-btn[data-view="library"]::before{content:"📖 "}
+.nav-btn[data-view="notes"]::before{content:"🗒️ "}
 .nav-btn[data-view="learn"]::before{content:"🎓 "}
 .nav-btn[data-view="flashcards"]::before{content:"🗂️ "}
 .nav-btn[data-view="tests"]::before{content:"✅ "}
@@ -379,6 +380,26 @@ button.danger:hover{background: rgba(255,77,109,0.18)}
   border-radius:999px;
   padding:6px 10px;
   background: rgba(255,255,255,0.02);
+  font-size:12px;
+}
+
+/* Notes */
+#view-notes .card{
+  gap:10px;
+}
+#view-notes #notes-list{
+  overflow-y:auto;
+}
+#view-notes #open-note-title{
+  width:100%;
+}
+#view-notes #open-note-body{
+  flex:1;
+  min-height:220px;
+  resize:vertical;
+}
+#view-notes .note-meta{
+  color:var(--muted);
   font-size:12px;
 }
 
