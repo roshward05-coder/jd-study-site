@@ -281,6 +281,16 @@
                 <button id="add-note" class="secondary">New note</button>
               </div>
               <div class="row gap wrap" style="margin-top:10px">
+                <select id="note-notebook"></select>
+                <input id="new-notebook" placeholder="Add notebook">
+                <button id="add-notebook" class="ghost">Add</button>
+              </div>
+              <div class="row gap wrap" style="margin-top:10px">
+                <select id="note-section"></select>
+                <input id="new-section" placeholder="Add section">
+                <button id="add-section" class="ghost">Add</button>
+              </div>
+              <div class="row gap wrap" style="margin-top:10px">
                 <input id="note-title" placeholder="Note title (e.g., Week 4 recap)">
               </div>
               <div id="notes-list" class="list"></div>
@@ -297,7 +307,12 @@
               <div id="note-meta" class="muted small">—</div>
               <div class="divider"></div>
               <input id="open-note-title" placeholder="Title">
-              <textarea id="open-note-body" rows="12" placeholder="Start writing..."></textarea>
+              <div class="row gap wrap" id="notes-toolbar">
+                <button id="notes-bold" class="ghost">Bold</button>
+                <button id="notes-italic" class="ghost">Italic</button>
+                <button id="notes-bullets" class="ghost">Bullets</button>
+              </div>
+              <div id="open-note-body" class="note-editor" contenteditable="true" placeholder="Start writing..."></div>
             </div>
           </div>
         </section>
