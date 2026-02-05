@@ -59,6 +59,7 @@
       <nav class="nav">
         <button data-view="units" class="nav-btn active">Units</button>
         <button data-view="library" class="nav-btn">Library</button>
+        <button data-view="notes" class="nav-btn">Notes</button>
         <button data-view="learn" class="nav-btn">Learn</button>
         <button data-view="flashcards" class="nav-btn">Flashcards</button>
         <button data-view="tests" class="nav-btn">Tests</button>
@@ -262,6 +263,41 @@
                 <button id="pin-to-exampack" class="secondary">Pin to exam pack</button>
                 <button id="delete-open" class="danger ghost">Delete</button>
               </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- NOTES -->
+        <section id="view-notes" class="view" style="display:none">
+          <div class="view-head">
+            <h2>Notes</h2>
+            <div class="muted">Capture quick notes by unit and keep them organised in one place.</div>
+          </div>
+
+          <div class="grid two">
+            <div class="card">
+              <div class="row between">
+                <h3>Your notes</h3>
+                <button id="add-note" class="secondary">New note</button>
+              </div>
+              <div class="row gap wrap" style="margin-top:10px">
+                <input id="note-title" placeholder="Note title (e.g., Week 4 recap)">
+              </div>
+              <div id="notes-list" class="list"></div>
+            </div>
+
+            <div class="card">
+              <div class="row between">
+                <h3>Note editor</h3>
+                <div class="row gap">
+                  <button id="save-note" class="secondary">Save</button>
+                  <button id="delete-note" class="danger ghost">Delete</button>
+                </div>
+              </div>
+              <div id="note-meta" class="muted small">—</div>
+              <div class="divider"></div>
+              <input id="open-note-title" placeholder="Title">
+              <textarea id="open-note-body" rows="12" placeholder="Start writing..."></textarea>
             </div>
           </div>
         </section>
