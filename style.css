@@ -390,13 +390,39 @@ button.danger:hover{background: rgba(255,77,109,0.18)}
 #view-notes #notes-list{
   overflow-y:auto;
 }
+#view-notes #note-notebook,
+#view-notes #note-section,
+#view-notes #new-notebook,
+#view-notes #new-section{
+  width:auto;
+  min-width:160px;
+}
+#view-notes #add-notebook,
+#view-notes #add-section{
+  padding:8px 12px;
+}
 #view-notes #open-note-title{
   width:100%;
 }
-#view-notes #open-note-body{
+#view-notes #notes-toolbar{
+  margin: 6px 0;
+}
+#view-notes #notes-toolbar button{
+  padding:6px 10px;
+}
+#view-notes .note-editor{
   flex:1;
   min-height:220px;
-  resize:vertical;
+  border:1px solid var(--border);
+  border-radius:12px;
+  padding:12px;
+  background: rgba(255,255,255,0.02);
+  overflow:auto;
+  outline:none;
+}
+#view-notes .note-editor:empty:before{
+  content: attr(placeholder);
+  color: var(--muted);
 }
 #view-notes .note-meta{
   color:var(--muted);
