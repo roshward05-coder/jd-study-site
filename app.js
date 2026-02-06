@@ -786,6 +786,7 @@ async function unitItemsSmart() {
   let activeUnitId = null;
   let openItemId = null;
   let openNoteId = null;
+  let notesUnitId = null;
 
   // ----------------------------
   // Router / navigation
@@ -918,6 +919,7 @@ $$('.nav-btn').forEach((btn) => {
     openNoteId = null;
     selectedForTest = [];
     save(KEY.SELECTED_FOR_TEST, selectedForTest);
+    if (!notesUnitId) notesUnitId = activeUnitId;
     refreshAll();
   });
 
@@ -929,6 +931,7 @@ $$('.nav-btn').forEach((btn) => {
     save(KEY.UNITS, units);
     $('#new-unit-input').value = '';
     activeUnitId = u.id;
+    if (!notesUnitId) notesUnitId = u.id;
     renderUnitSelect();
     refreshAll();
   });
@@ -979,6 +982,9 @@ $$('.nav-btn').forEach((btn) => {
     
     // Switch to first remaining unit
     activeUnitId = units[0].id;
+    if (!notesUnitId || notesUnitId === currentUnit.id) {
+      notesUnitId = activeUnitId;
+    }
     
     // Refresh UI
     renderUnitSelect();
@@ -1419,16 +1425,18 @@ $('#filter-tag')?.addEventListener('change', rerenderLibrarySmart);
   // Notes
   // ----------------------------
   function unitNotes() {
-    return notes.filter((n) => n.unitId === activeUnitId);
+    const targetUnitId = notesUnitId || activeUnitId;
+    return notes.filter((n) => n.unitId === targetUnitId);
   }
 
   function renderNoteFilters() {
     const unitSel = $('#note-unit');
     if (!unitSel) return;
+    if (!notesUnitId) notesUnitId = activeUnitId;
     unitSel.innerHTML = units
       .map((u) => `<option value="${escapeHtml(u.id)}">${escapeHtml(u.name)}</option>`)
       .join('');
-    unitSel.value = activeUnitId;
+    unitSel.value = notesUnitId;
   }
 
   function openNote(id) {
@@ -1507,7 +1515,7 @@ $('#filter-tag')?.addEventListener('change', rerenderLibrarySmart);
     const title = (titleInput?.value || '').trim() || 'Untitled';
     const note = {
       id: uid(),
-      unitId: activeUnitId,
+      unitId: notesUnitId || activeUnitId,
       title,
       content: '',
       notebook: 'General',
@@ -1524,10 +1532,8 @@ $('#filter-tag')?.addEventListener('change', rerenderLibrarySmart);
   });
 
   $('#note-unit')?.addEventListener('change', (e) => {
-    activeUnitId = e.target.value;
-    renderUnitSelect();
-    refreshAll();
-    show('notes');
+    notesUnitId = e.target.value;
+    renderNotesList();
   });
 
   $('#save-note')?.addEventListener('click', saveOpenNote);
