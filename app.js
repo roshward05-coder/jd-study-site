@@ -32,6 +32,15 @@
   const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVqd2F5ZXRxbWN2YnFsY2t2amtzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjgzNzM4NDksImV4cCI6MjA4Mzk0OTg0OX0.1v1MB3AgnmnmEY37C2p9KrwhCsMiG0yLV30-1jz4rP8";
   const supabase = window.supabase?.createClient?.(SUPABASE_URL, SUPABASE_ANON_KEY);
 
+  let isAuthed = false;
+
+  function setOfflineIndicator(show, text = 'Offline mode') {
+    const el = document.getElementById('offline-indicator');
+    if (!el) return;
+    el.style.display = show ? 'inline-flex' : 'none';
+    el.textContent = text;
+  }
+
   // Auth UI elements
   const authEmail = document.getElementById("auth-email");
   const authSend = document.getElementById("auth-send");
@@ -41,34 +50,45 @@
   // Require login for app
   async function requireAuth() {
     if (!supabase) {
-      authStatus && (authStatus.textContent = "Supabase client not found. Check you loaded supabase-js.");
+      authStatus && (authStatus.textContent = "Offline mode (Supabase not loaded). Sign in later to sync.");
       authLogout && (authLogout.style.display = "none");
+      isAuthed = false;
+      setOfflineIndicator(true, 'Offline mode');
       return null;
     }
     const { data } = await supabase.auth.getSession();
     const session = data.session;
     if (!session) {
-      authStatus && (authStatus.textContent = "Please log in to use your private library.");
+      authStatus && (authStatus.textContent = "Offline mode: log in to sync your private library.");
       authLogout && (authLogout.style.display = "none");
+      isAuthed = false;
+      setOfflineIndicator(true, 'Offline mode');
       return null;
     }
     authStatus && (authStatus.textContent = `Logged in: ${session.user.email}`);
     authLogout && (authLogout.style.display = "inline-flex");
+    isAuthed = true;
+    setOfflineIndicator(false);
     return session.user;
   }
 
   authSend?.addEventListener("click", async () => {
-  if (!supabase) return alert("Supabase not loaded. Add the supabase-js script tag in index.html.");
-  const email = (authEmail?.value || "").trim();
-  if (!email) return alert("Enter your email.");
-  const { error } = await supabase.auth.signInWithOtp({
-  email,
-  options: {
-    emailRedirectTo: window.location.origin
-  }
-});
-    if (error) return alert(error.message);
-    alert("Login link sent! Check your email.");
+    if (!supabase) return alert("Supabase not loaded. Add the supabase-js script tag in index.html.");
+    const email = (authEmail?.value || "").trim();
+    if (!email) return alert("Enter your email.");
+    setButtonLoading(authSend, true, 'Sending...');
+    try {
+      const { error } = await supabase.auth.signInWithOtp({
+        email,
+        options: {
+          emailRedirectTo: window.location.origin
+        }
+      });
+      if (error) return alert(error.message);
+      alert("Login link sent! Check your email.");
+    } finally {
+      setButtonLoading(authSend, false);
+    }
   });
 
   authLogout?.addEventListener("click", async () => {
@@ -243,7 +263,8 @@
     STREAK: 'jdh_streak',
     SELECTED_FOR_TEST: 'jdh_selected_for_test',
     CITATIONS: 'jdh_citations',
-    NOTES: 'jdh_notes'
+    NOTES: 'jdh_notes',
+    LAST_VIEW: 'jdh_last_view'
   };
 
   const VERSION = 2;
@@ -286,6 +307,20 @@
   function toast(msg) {
     // If you have a toast UI, plug it in. Otherwise fall back:
     console.log(msg);
+  }
+
+  function setButtonLoading(btn, loading, loadingLabel = 'Working...') {
+    if (!btn) return;
+    if (!btn.dataset.label) btn.dataset.label = btn.textContent;
+    btn.disabled = loading;
+    btn.textContent = loading ? loadingLabel : btn.dataset.label;
+  }
+
+  function getCurrentLibraryItems() {
+    if (isAuthed && cloudCache.isReady) {
+      return cloudCache.items.map(rowToLocalShape);
+    }
+    return unitItems();
   }
 // ----------------------------
 // PDF Book Viewer (pdf.js)
@@ -693,6 +728,11 @@ async function unitItemsSmart() {
   $$('.nav-btn').forEach((b) => {
     b.classList.toggle('active', b.dataset.view === viewName);
   });
+
+  if (views[viewName]) {
+    save(KEY.LAST_VIEW, viewName);
+    views[viewName].scrollTop = 0;
+  }
 }
 
 
@@ -719,12 +759,7 @@ async function go(viewName) {
   // If this view is private, require login
   if (PRIVATE_VIEWS.has(viewName)) {
     const user = await requireAuth();
-    if (!user) {
-      // Redirect back to Units if not logged in
-      show('units');
-      alert('Please log in first to access your private study hub.');
-      return;
-    }
+    if (!user) return; // Offline/local mode still works without cloud
 
     // If logged in, refresh cloud-driven parts when needed
     if (viewName === 'library' || viewName === 'tests' || viewName === 'learn') {
@@ -919,6 +954,11 @@ $$('.nav-btn').forEach((btn) => {
   const files = Array.from(e.target.files || []);
   if (!files.length) return;
 
+  const uploadStatus = $('#upload-status');
+  const fileInput = $('#file-input');
+  if (fileInput) fileInput.disabled = true;
+  if (uploadStatus) uploadStatus.textContent = 'Uploading...';
+
   // PRIVATE MODE: force login
   const user = await requireAuth();
   if (!user) {
@@ -980,6 +1020,8 @@ $$('.nav-btn').forEach((btn) => {
   e.target.value = '';
   // Refresh cloud-driven UI
   if (typeof cloudLoadAll === "function") await cloudLoadAll();
+  if (uploadStatus) uploadStatus.textContent = '';
+  if (fileInput) fileInput.disabled = false;
 });
 
 
@@ -1035,7 +1077,7 @@ $$('.nav-btn').forEach((btn) => {
 
     const typeFilter = $('#filter-type')?.value || '';
     const tagFilter = $('#filter-tag')?.value || '';
-    const filtered = unitItems().filter((it) => {
+    const filtered = getCurrentLibraryItems().filter((it) => {
       const okType = typeFilter ? it.type === typeFilter : true;
       const okTag = tagFilter ? (it.tags || []).includes(tagFilter) : true;
       return okType && okTag;
@@ -1064,15 +1106,18 @@ $$('.nav-btn').forEach((btn) => {
 
       // Delete button handler
       const deleteBtn = div.querySelector('[data-delete-id]');
-      deleteBtn?.addEventListener('click', (e) => {
+      deleteBtn?.addEventListener('click', async (e) => {
         e.stopPropagation(); // Don't trigger item open
         if (!confirm(`Delete "${it.title}"?`)) return;
-        
-        items = items.filter(i => i.id !== it.id);
-        save(KEY.ITEMS, items);
-        renderLibrary();
+        if (it._cloud) {
+          await cloudDeleteLibraryItem(it.id, it.storage_path);
+          await cloudLoadAll();
+        } else {
+          items = items.filter(i => i.id !== it.id);
+          save(KEY.ITEMS, items);
+          renderLibrary();
+        }
         renderStats();
-        
         // Clear open item if it was deleted
         if (openItemId === it.id) {
           openItemId = null;
@@ -1081,7 +1126,6 @@ $$('.nav-btn').forEach((btn) => {
           $('#open-item-meta').textContent = '';
           pdfShow(false);
         }
-        
         toast(`Item "${it.title}" deleted.`);
       });
 
@@ -1832,7 +1876,7 @@ $('#filter-tag')?.addEventListener('change', rerenderLibrarySmart);
     if (!tagSel || !testTagSel || !practiceSel) return;
 
     const tags = new Set();
-    unitItems().forEach((it) => (it.tags || []).forEach((t) => tags.add(t)));
+    getCurrentLibraryItems().forEach((it) => (it.tags || []).forEach((t) => tags.add(t)));
     const list = Array.from(tags).sort((a, b) => a.localeCompare(b));
 
     tagSel.innerHTML = '<option value="">All topics</option>' + list.map((t) => `<option value="${escapeHtml(t)}">${escapeHtml(t)}</option>`).join('');
@@ -1847,7 +1891,7 @@ $('#filter-tag')?.addEventListener('change', rerenderLibrarySmart);
     if (!container) return;
     const m = unitMastery();
     const tags = new Set();
-    unitItems().forEach((it) => (it.tags || []).forEach((t) => tags.add(t)));
+    getCurrentLibraryItems().forEach((it) => (it.tags || []).forEach((t) => tags.add(t)));
     const list = Array.from(tags).sort((a, b) => a.localeCompare(b));
     container.innerHTML = '';
     if (!list.length) {
@@ -2538,40 +2582,89 @@ $('#filter-tag')?.addEventListener('change', rerenderLibrarySmart);
     if (!query) return;
 
     const q = query.toLowerCase();
-    const results = items
+    const textFromHtml = (html) => (html || '').replace(/<[^>]*>/g, ' ');
+
+    const libraryResults = getCurrentLibraryItems()
       .filter((it) =>
         (it.title || '').toLowerCase().includes(q) ||
         (it.content || '').toLowerCase().includes(q) ||
         (it.tags || []).some((t) => t.toLowerCase().includes(q))
       )
-      .slice(0, 40);
+      .slice(0, 20)
+      .map((it) => ({ type: 'library', item: it }));
+
+    const noteResults = notes
+      .filter((n) =>
+        (n.title || '').toLowerCase().includes(q) ||
+        textFromHtml(n.content || '').toLowerCase().includes(q)
+      )
+      .slice(0, 10)
+      .map((n) => ({ type: 'note', item: n }));
+
+    const todoResults = todos
+      .filter((t) => (t.text || '').toLowerCase().includes(q))
+      .slice(0, 10)
+      .map((t) => ({ type: 'todo', item: t }));
+
+    const results = [...libraryResults, ...noteResults, ...todoResults].slice(0, 40);
 
     if (!results.length) {
       container.innerHTML = '<div class="search-item muted">No results.</div>';
       return;
     }
 
-    results.forEach((it) => {
+    results.forEach((res) => {
+      const it = res.item;
+      const label = res.type === 'library' ? 'Library' : res.type === 'note' ? 'Note' : 'Task';
+      const unitName = units.find(u => u.id === it.unitId)?.name || activeUnitName();
       const div = document.createElement('div');
       div.className = 'search-item';
-      div.innerHTML = `
-        <strong>${escapeHtml(it.title)}</strong>
-        <div class="muted small">${escapeHtml(it.type.toUpperCase())} • ${escapeHtml(units.find(u=>u.id===it.unitId)?.name || '')}</div>
-        <div class="snippet">${escapeHtml(snippetOf(it.content, query))}</div>
-      `;
+      if (res.type === 'library') {
+        div.innerHTML = `
+          <strong>${escapeHtml(it.title)}</strong>
+          <div class="muted small">${escapeHtml(it.type.toUpperCase())} • ${escapeHtml(unitName)} • ${label}</div>
+          <div class="snippet">${escapeHtml(snippetOf(it.content, query))}</div>
+        `;
+      } else if (res.type === 'note') {
+        div.innerHTML = `
+          <strong>${escapeHtml(it.title || 'Untitled')}</strong>
+          <div class="muted small">${escapeHtml(unitName)} • ${label}</div>
+          <div class="snippet">${escapeHtml(snippetOf(textFromHtml(it.content || ''), query))}</div>
+        `;
+      } else {
+        div.innerHTML = `
+          <strong>${escapeHtml(it.text || 'Task')}</strong>
+          <div class="muted small">${escapeHtml(unitName)} • ${label}</div>
+          <div class="snippet">${escapeHtml(snippetOf(it.text || '', query))}</div>
+        `;
+      }
       div.addEventListener('click', () => {
         $('#global-search').value = '';
         container.style.display = 'none';
-        show('library');
-        activeUnitId = it.unitId;
-        renderUnitSelect();
-        openLibraryItem(it.id);
-        renderLibrary();
-        renderTags();
-        renderPackList();
-        renderIssues();
-        renderStats();
-        renderUnitCards();
+        if (res.type === 'library') {
+          show('library');
+          activeUnitId = it.unitId || activeUnitId;
+          renderUnitSelect();
+          openLibraryItem(it.id);
+          renderLibrary();
+          renderTags();
+          renderPackList();
+          renderIssues();
+          renderStats();
+          renderUnitCards();
+        } else if (res.type === 'note') {
+          show('notes');
+          activeUnitId = it.unitId || activeUnitId;
+          renderUnitSelect();
+          renderNoteFilters();
+          renderNotesList();
+          openNote(it.id);
+        } else {
+          show('tasks');
+          activeUnitId = it.unitId || activeUnitId;
+          renderUnitSelect();
+          renderTodos();
+        }
       });
       container.appendChild(div);
     });
@@ -2598,7 +2691,7 @@ $('#filter-tag')?.addEventListener('change', rerenderLibrarySmart);
   }
 
   function renderStats() {
-    const unitCount = unitItems().length;
+    const unitCount = getCurrentLibraryItems().length;
     $('#stat-items').textContent = unitCount;
 
     const today = toISODate(new Date());
@@ -2682,9 +2775,28 @@ $('#filter-tag')?.addEventListener('change', rerenderLibrarySmart);
       todos,
       timetable,
       issues,
+      notes,
       mastery,
       streak
     };
+      $('#export-notes')?.addEventListener('click', () => {
+        const data = notes.slice().sort((a, b) => (b.updated || b.created) - (a.updated || a.created));
+        if (!data.length) return alert('No notes to export yet.');
+        const html = `<!doctype html><html><head><meta charset="utf-8"><title>JD Study Hub Notes Export</title></head><body>${
+          data.map((n) => {
+            const unit = units.find(u => u.id === n.unitId)?.name || 'Unit';
+            const updated = new Date(n.updated || n.created).toLocaleString();
+            return `<article style="margin-bottom:24px"><h2>${escapeHtml(n.title || 'Untitled')}</h2><div style="color:#666;font-size:12px">${escapeHtml(unit)} • ${escapeHtml(updated)}</div><div>${n.content || ''}</div></article>`;
+          }).join('')
+        }</body></html>`;
+        const blob = new Blob([html], { type: 'text/html' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `jd-study-hub-notes-${toISODate(new Date())}.html`;
+        a.click();
+        URL.revokeObjectURL(url);
+      });
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -2709,6 +2821,7 @@ $('#filter-tag')?.addEventListener('change', rerenderLibrarySmart);
       todos = data.todos || [];
       timetable = data.timetable || [];
       issues = data.issues || [];
+      notes = data.notes || [];
       mastery = data.mastery || {};
       streak = data.streak || { lastDayISO: null, count: 0 };
 
@@ -2718,6 +2831,7 @@ $('#filter-tag')?.addEventListener('change', rerenderLibrarySmart);
       save(KEY.TODOS, todos);
       save(KEY.TT, timetable);
       save(KEY.ISSUES, issues);
+      save(KEY.NOTES, notes);
       save(KEY.MASTERY, mastery);
       save(KEY.STREAK, streak);
       save(KEY.V, VERSION);
@@ -2795,7 +2909,7 @@ $('#filter-tag')?.addEventListener('change', rerenderLibrarySmart);
   ensureDefaultUnit();
   renderUnitSelect();
   refreshAll();
-  show('units');
+  go(load(KEY.LAST_VIEW, 'units'));
 window.addEventListener("load", async () => {
   if (supabase) {
     // Supabase will parse the URL hash (access_token) and store the session automatically.
@@ -2803,12 +2917,7 @@ window.addEventListener("load", async () => {
     await supabase.auth.getSession();
   }
 
-  const user = await requireAuth();
-  if (!user) {
-    show('units');
-    return;
-  }
-  await cloudLoadAll();
+  await go(load(KEY.LAST_VIEW, 'units'));
 });
 
 })(); // <- FINAL LINE
