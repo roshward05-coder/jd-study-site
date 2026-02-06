@@ -407,16 +407,9 @@ button.danger:hover{background: rgba(255,77,109,0.18)}
 #view-notes #notes-list{
   overflow-y:auto;
 }
-#view-notes #note-notebook,
-#view-notes #note-section,
-#view-notes #new-notebook,
-#view-notes #new-section{
+#view-notes #note-unit{
   width:auto;
   min-width:160px;
-}
-#view-notes #add-notebook,
-#view-notes #add-section{
-  padding:8px 12px;
 }
 #view-notes #open-note-title{
   width:100%;
