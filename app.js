@@ -1423,34 +1423,12 @@ $('#filter-tag')?.addEventListener('change', rerenderLibrarySmart);
   }
 
   function renderNoteFilters() {
-    const notebookSel = $('#note-notebook');
-    const sectionSel = $('#note-section');
-    if (!notebookSel || !sectionSel) return;
-
-    const data = unitNotes();
-    const notebooks = new Set(data.map((n) => n.notebook || 'General'));
-    if (!notebooks.size) notebooks.add('General');
-
-    const currentNotebook = notebookSel.value || 'General';
-    notebookSel.innerHTML = Array.from(notebooks)
-      .sort((a, b) => a.localeCompare(b))
-      .map((n) => `<option value="${escapeHtml(n)}">${escapeHtml(n)}</option>`)
+    const unitSel = $('#note-unit');
+    if (!unitSel) return;
+    unitSel.innerHTML = units
+      .map((u) => `<option value="${escapeHtml(u.id)}">${escapeHtml(u.name)}</option>`)
       .join('');
-    notebookSel.value = notebooks.has(currentNotebook) ? currentNotebook : 'General';
-
-    const sections = new Set(
-      data
-        .filter((n) => (n.notebook || 'General') === notebookSel.value)
-        .map((n) => n.section || 'General')
-    );
-    if (!sections.size) sections.add('General');
-
-    const currentSection = sectionSel.value || 'General';
-    sectionSel.innerHTML = Array.from(sections)
-      .sort((a, b) => a.localeCompare(b))
-      .map((s) => `<option value="${escapeHtml(s)}">${escapeHtml(s)}</option>`)
-      .join('');
-    sectionSel.value = sections.has(currentSection) ? currentSection : 'General';
+    unitSel.value = activeUnitId;
   }
 
   function openNote(id) {
@@ -1470,11 +1448,7 @@ $('#filter-tag')?.addEventListener('change', rerenderLibrarySmart);
   function renderNotesList() {
     const list = $('#notes-list');
     if (!list) return;
-    const notebook = $('#note-notebook')?.value || 'General';
-    const section = $('#note-section')?.value || 'General';
     const data = unitNotes()
-      .filter((n) => (n.notebook || 'General') === notebook)
-      .filter((n) => (n.section || 'General') === section)
       .slice()
       .sort((a, b) => (b.updated || b.created) - (a.updated || a.created));
     list.innerHTML = '';
@@ -1516,12 +1490,10 @@ $('#filter-tag')?.addEventListener('change', rerenderLibrarySmart);
     if (!note) return;
     const titleEl = $('#open-note-title');
     const bodyEl = $('#open-note-body');
-    const notebookSel = $('#note-notebook');
-    const sectionSel = $('#note-section');
     note.title = (titleEl?.value || '').trim() || 'Untitled';
     note.content = bodyEl?.innerHTML || '';
-    note.notebook = notebookSel?.value || 'General';
-    note.section = sectionSel?.value || 'General';
+    note.notebook = note.notebook || 'General';
+    note.section = note.section || 'General';
     note.updated = now();
     save(KEY.NOTES, notes);
     renderNoteFilters();
@@ -1532,16 +1504,14 @@ $('#filter-tag')?.addEventListener('change', rerenderLibrarySmart);
 
   $('#add-note')?.addEventListener('click', () => {
     const titleInput = $('#note-title');
-    const notebookSel = $('#note-notebook');
-    const sectionSel = $('#note-section');
     const title = (titleInput?.value || '').trim() || 'Untitled';
     const note = {
       id: uid(),
       unitId: activeUnitId,
       title,
       content: '',
-      notebook: notebookSel?.value || 'General',
-      section: sectionSel?.value || 'General',
+      notebook: 'General',
+      section: 'General',
       created: now(),
       updated: now()
     };
@@ -1553,39 +1523,11 @@ $('#filter-tag')?.addEventListener('change', rerenderLibrarySmart);
     openNote(note.id);
   });
 
-  $('#add-notebook')?.addEventListener('click', () => {
-    const input = $('#new-notebook');
-    const name = (input?.value || '').trim();
-    if (!name) return;
-    const notebookSel = $('#note-notebook');
-    if (notebookSel) {
-      notebookSel.value = name;
-    }
-    if (input) input.value = '';
-    renderNoteFilters();
-    renderNotesList();
-  });
-
-  $('#add-section')?.addEventListener('click', () => {
-    const input = $('#new-section');
-    const name = (input?.value || '').trim();
-    if (!name) return;
-    const sectionSel = $('#note-section');
-    if (sectionSel) {
-      sectionSel.value = name;
-    }
-    if (input) input.value = '';
-    renderNoteFilters();
-    renderNotesList();
-  });
-
-  $('#note-notebook')?.addEventListener('change', () => {
-    renderNoteFilters();
-    renderNotesList();
-  });
-
-  $('#note-section')?.addEventListener('change', () => {
-    renderNotesList();
+  $('#note-unit')?.addEventListener('change', (e) => {
+    activeUnitId = e.target.value;
+    renderUnitSelect();
+    refreshAll();
+    show('notes');
   });
 
   $('#save-note')?.addEventListener('click', saveOpenNote);
