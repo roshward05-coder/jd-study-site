@@ -50,6 +50,7 @@
   <button id="auth-logout" class="ghost" style="display:none">Logout</button>
 </div>
 <div id="auth-status" class="muted small" style="margin-left:10px"></div>
+  <div id="offline-indicator" class="badge" style="display:none">Offline mode</div>
 
         <button id="theme-toggle" class="ghost">Theme</button>
       </div>
@@ -94,35 +95,7 @@
     </div>
 
     <div class="layout">
-      <aside class="sidebar" style="display:none">
-        <div class="unit-switcher">
-          <label class="label">Current unit</label>
-          <select id="active-unit"></select>
-          <div class="row gap">
-            <input id="new-unit-input" placeholder="Add unit (e.g., Contracts)">
-            <button id="add-unit">Add</button>
-          </div>
-          <div class="row gap" style="margin-top:8px">
-            <button id="delete-unit" class="danger">Delete current unit</button>
-          </div>
-          <div class="muted small">Tip: most tools (tasks, packs, progress) follow your selected unit.</div>
-        </div>
-
-        <div class="stats">
-          <div class="stat">
-            <div class="k" id="stat-items">0</div>
-            <div class="v">Library items</div>
-          </div>
-          <div class="stat">
-            <div class="k" id="stat-due">0</div>
-            <div class="v">Cards due</div>
-          </div>
-          <div class="stat">
-            <div class="k" id="stat-streak">0</div>
-            <div class="v">Day streak</div>
-          </div>
-        </div>
-      </aside>
+      <aside class="sidebar" style="display:none"></aside>
 
       <main class="main">
         <!-- UNITS -->
@@ -197,6 +170,7 @@
               <div class="upload">
                 <label class="label">Upload files (TXT or PDF)</label>
                 <input id="file-input" type="file" accept=".txt,.pdf" multiple>
+                <div id="upload-status" class="muted small" style="margin-top:6px"></div>
                 <div class="muted small">PDFs are converted to text in your browser using pdf.js.</div>
               </div>
 
@@ -737,6 +711,7 @@
               <h3>Data</h3>
               <div class="row gap wrap">
                 <button id="export-data" class="secondary">Export JSON</button>
+                <button id="export-notes" class="secondary">Export Notes (.html)</button>
                 <label class="btn secondary" for="import-data">Import JSON</label>
                 <input id="import-data" type="file" accept=".json" style="display:none">
                 <button id="wipe-data" class="danger">Wipe local data</button>
