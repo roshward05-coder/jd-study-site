@@ -316,6 +316,71 @@
     btn.textContent = loading ? loadingLabel : btn.dataset.label;
   }
 
+  // Local PDF persistence (IndexedDB)
+  const PDF_DB_NAME = 'jd_study_pdf_store';
+  const PDF_STORE = 'pdfs';
+  let _pdfDbPromise = null;
+
+  function openPdfDb() {
+    if (!window.indexedDB) return Promise.reject(new Error('IndexedDB not supported.'));
+    if (_pdfDbPromise) return _pdfDbPromise;
+    _pdfDbPromise = new Promise((resolve, reject) => {
+      const req = indexedDB.open(PDF_DB_NAME, 1);
+      req.onupgradeneeded = () => {
+        const db = req.result;
+        if (!db.objectStoreNames.contains(PDF_STORE)) {
+          db.createObjectStore(PDF_STORE, { keyPath: 'id' });
+        }
+      };
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error || new Error('Failed to open IndexedDB.'));
+    });
+    return _pdfDbPromise;
+  }
+
+  async function savePdfBlob(blob, meta = {}) {
+    const db = await openPdfDb();
+    const id = uid();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(PDF_STORE, 'readwrite');
+      tx.objectStore(PDF_STORE).put({ id, blob, name: meta.name || '', type: meta.type || blob.type, created: now() });
+      tx.oncomplete = () => resolve(id);
+      tx.onerror = () => reject(tx.error || new Error('Failed to save PDF.'));
+    });
+  }
+
+  async function getPdfBlob(id) {
+    if (!id) return null;
+    const db = await openPdfDb();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(PDF_STORE, 'readonly');
+      const req = tx.objectStore(PDF_STORE).get(id);
+      req.onsuccess = () => resolve(req.result?.blob || null);
+      req.onerror = () => reject(req.error || new Error('Failed to load PDF.'));
+    });
+  }
+
+  async function deletePdfBlob(id) {
+    if (!id) return;
+    const db = await openPdfDb();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(PDF_STORE, 'readwrite');
+      tx.objectStore(PDF_STORE).delete(id);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error || new Error('Failed to delete PDF.'));
+    });
+  }
+
+  async function clearPdfStore() {
+    const db = await openPdfDb();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(PDF_STORE, 'readwrite');
+      tx.objectStore(PDF_STORE).clear();
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error || new Error('Failed to clear PDF store.'));
+    });
+  }
+
   function getCurrentLibraryItems() {
     if (isAuthed && cloudCache.isReady) {
       return cloudCache.items.map(rowToLocalShape);
@@ -327,6 +392,7 @@
 // ----------------------------
 let _pdfDoc = null;
 let _pdfUrlForTab = null;
+let _pdfLocalUrl = null;
 let _pdfPage = 1;      // left page number
 let _pdfScale = 1.1;
 
@@ -384,6 +450,10 @@ async function pdfOpenFromUrl(url) {
   } catch (_) {}
 
   _pdfUrlForTab = url;
+  if (_pdfLocalUrl) {
+    URL.revokeObjectURL(_pdfLocalUrl);
+    _pdfLocalUrl = null;
+  }
 
   const loadingTask = pdfjsLib.getDocument({ url });
   _pdfDoc = await loadingTask.promise;
@@ -429,6 +499,21 @@ document.getElementById("pdf-open-new")?.addEventListener("click", () => {
 
   const url = await cloudSignedUrl(item.storage_path);
   await pdfOpenFromUrl(url);
+}
+
+async function openLocalPdfInViewer(item) {
+  if (!item?.pdf_blob_id) {
+    alert("This item has no locally saved PDF.");
+    return;
+  }
+  const blob = await getPdfBlob(item.pdf_blob_id);
+  if (!blob) {
+    alert("Local PDF not found. It may have been cleared from browser storage.");
+    return;
+  }
+  if (_pdfLocalUrl) URL.revokeObjectURL(_pdfLocalUrl);
+  _pdfLocalUrl = URL.createObjectURL(blob);
+  await pdfOpenFromUrl(_pdfLocalUrl);
 }
 
 // Cloud-first mode glue
@@ -864,6 +949,12 @@ $$('.nav-btn').forEach((btn) => {
     units = units.filter(u => u.id !== activeUnitId);
     
     // Remove associated data
+    const removedItems = items.filter(item => item.unitId === activeUnitId);
+    for (const it of removedItems) {
+      if (it.pdf_blob_id) {
+        try { await deletePdfBlob(it.pdf_blob_id); } catch (_) {}
+      }
+    }
     items = items.filter(item => item.unitId !== activeUnitId);
     decks = decks.filter(deck => deck.unitId !== activeUnitId);
     todos = todos.filter(todo => todo.unitId !== activeUnitId);
@@ -959,10 +1050,14 @@ $$('.nav-btn').forEach((btn) => {
   if (fileInput) fileInput.disabled = true;
   if (uploadStatus) uploadStatus.textContent = 'Uploading...';
 
-  // PRIVATE MODE: force login
+  // Cloud if logged in; otherwise save locally in browser storage
   const user = await requireAuth();
-  if (!user) {
+  const useCloud = !!user;
+  if (!useCloud && !window.indexedDB) {
+    alert('Offline PDF saving requires IndexedDB support in this browser.');
     e.target.value = '';
+    if (uploadStatus) uploadStatus.textContent = '';
+    if (fileInput) fileInput.disabled = false;
     return;
   }
 
@@ -979,35 +1074,69 @@ $$('.nav-btn').forEach((btn) => {
         // 1) Extract text locally (pdf.js)
         const extractedText = await extractTextFromPDF(file);
 
-        // 2) Upload PDF to Supabase Storage
-        const storage_path = await cloudUploadPdf(file);
+        if (useCloud) {
+          // 2) Upload PDF to Supabase Storage
+          const storage_path = await cloudUploadPdf(file);
 
-        // 3) Insert metadata + extracted text into Supabase table
-        await cloudInsertLibraryItem({
-          unit,
-          title: file.name,
-          type,
-          tags,
-          storage_path,
-          content_text: extractedText
-        });
+          // 3) Insert metadata + extracted text into Supabase table
+          await cloudInsertLibraryItem({
+            unit,
+            title: file.name,
+            type,
+            tags,
+            storage_path,
+            content_text: extractedText
+          });
 
-        toast(`Uploaded PDF: ${file.name}`);
+          toast(`Uploaded PDF: ${file.name}`);
+        } else {
+          const pdf_blob_id = await savePdfBlob(file, { name: file.name, type: file.type });
+          const it = {
+            id: uid(),
+            unitId: activeUnitId,
+            title: file.name,
+            type,
+            tags,
+            content: extractedText,
+            created: now(),
+            pinned: false,
+            pdf_blob_id
+          };
+          items.unshift(it);
+          save(KEY.ITEMS, items);
+          toast(`Saved PDF locally: ${file.name}`);
+        }
       } else if (isTXT) {
         // 1) Read text
         const content_text = await file.text();
 
-        // 2) Insert into Supabase table (no storage file)
-        await cloudInsertLibraryItem({
-          unit,
-          title: file.name,
-          type,
-          tags,
-          storage_path: null,
-          content_text
-        });
+        if (useCloud) {
+          // 2) Insert into Supabase table (no storage file)
+          await cloudInsertLibraryItem({
+            unit,
+            title: file.name,
+            type,
+            tags,
+            storage_path: null,
+            content_text
+          });
 
-        toast(`Uploaded TXT: ${file.name}`);
+          toast(`Uploaded TXT: ${file.name}`);
+        } else {
+          const it = {
+            id: uid(),
+            unitId: activeUnitId,
+            title: file.name,
+            type,
+            tags,
+            content: content_text,
+            created: now(),
+            pinned: false
+          };
+          items.unshift(it);
+          save(KEY.ITEMS, items);
+          toast(`Saved TXT locally: ${file.name}`);
+        }
       } else {
         alert(`Unsupported file: ${file.name}\nOnly PDF and TXT are supported.`);
       }
@@ -1018,8 +1147,13 @@ $$('.nav-btn').forEach((btn) => {
   }
 
   e.target.value = '';
-  // Refresh cloud-driven UI
-  if (typeof cloudLoadAll === "function") await cloudLoadAll();
+  // Refresh UI
+  if (useCloud && typeof cloudLoadAll === "function") await cloudLoadAll();
+  if (!useCloud) {
+    renderLibrary();
+    renderTags();
+    renderStats();
+  }
   if (uploadStatus) uploadStatus.textContent = '';
   if (fileInput) fileInput.disabled = false;
 });
@@ -1050,7 +1184,7 @@ $$('.nav-btn').forEach((btn) => {
 
   // Show/hide view mode toggle for PDF items
   const viewModeToggle = $('#view-mode-toggle');
-  const isPdf = it._cloud && it.storage_path && it.storage_path.toLowerCase().endsWith('.pdf');
+  const isPdf = (it._cloud && it.storage_path && it.storage_path.toLowerCase().endsWith('.pdf')) || !!it.pdf_blob_id;
   if (viewModeToggle) {
     viewModeToggle.style.display = isPdf ? 'flex' : 'none';
   }
@@ -1096,10 +1230,11 @@ $$('.nav-btn').forEach((btn) => {
 
       const tags = (it.tags || []).slice(0, 3).map((t) => `<span class="badge">${escapeHtml(t)}</span>`).join(' ');
       const pin = it.pinned ? '<span class="pill">Pinned</span>' : '';
+      const pdfPill = (it.storage_path || it.pdf_blob_id) ? '<span class="pill">PDF</span>' : '';
       div.innerHTML = `
         <div class="row between">
           <strong>${escapeHtml(it.title)}</strong>
-          <div class="row gap">${pin}<span class="badge">${escapeHtml(it.type)}</span><button class="danger ghost" style="padding:4px 8px; font-size:11px" data-delete-id="${it.id}">Delete</button></div>
+          <div class="row gap">${pin}${pdfPill}<span class="badge">${escapeHtml(it.type)}</span><button class="danger ghost" style="padding:4px 8px; font-size:11px" data-delete-id="${it.id}">Delete</button></div>
         </div>
         <div class="muted small" style="margin-top:6px">${tags || '<span class="muted small">No tags</span>'}</div>
       `;
@@ -1113,6 +1248,9 @@ $$('.nav-btn').forEach((btn) => {
           await cloudDeleteLibraryItem(it.id, it.storage_path);
           await cloudLoadAll();
         } else {
+          if (it.pdf_blob_id) {
+            await deletePdfBlob(it.pdf_blob_id);
+          }
           items = items.filter(i => i.id !== it.id);
           save(KEY.ITEMS, items);
           renderLibrary();
@@ -1199,11 +1337,23 @@ $('#filter-tag')?.addEventListener('change', rerenderLibrarySmart);
 
   $('#delete-open')?.addEventListener('click', () => {
     if (!openItemId) return;
-    const it = items.find((x) => x.id === openItemId);
+    let it = items.find((x) => x.id === openItemId);
+    if (!it && cloudCache.byId?.has(openItemId)) {
+      it = rowToLocalShape(cloudCache.byId.get(openItemId));
+    }
     if (!it) return;
     if (!confirm(`Delete “${it.title}”?`)) return;
-    items = items.filter((x) => x.id !== openItemId);
-    save(KEY.ITEMS, items);
+    if (it._cloud) {
+      cloudDeleteLibraryItem(it.id, it.storage_path)
+        .then(() => cloudLoadAll())
+        .catch((err) => alert(`Delete failed: ${err?.message || err}`));
+    } else {
+      if (it.pdf_blob_id) {
+        deletePdfBlob(it.pdf_blob_id).catch(() => {});
+      }
+      items = items.filter((x) => x.id !== openItemId);
+      save(KEY.ITEMS, items);
+    }
     openItemId = null;
     renderLibrary();
     renderTags();
@@ -1228,11 +1378,17 @@ $('#filter-tag')?.addEventListener('change', rerenderLibrarySmart);
     if (!it && cloudCache.byId?.has(openItemId)) {
       it = rowToLocalShape(cloudCache.byId.get(openItemId));
     }
-    if (!it || !it._cloud || !it.storage_path) return;
+    if (!it) return alert('This item has no PDF.');
     
     // Show PDF view, hide text view
     $('#doc-body').style.display = 'none';
-    await openCloudPdfInViewer(it);
+    if (it._cloud && it.storage_path) {
+      await openCloudPdfInViewer(it);
+    } else if (it.pdf_blob_id) {
+      await openLocalPdfInViewer(it);
+    } else {
+      return alert('This item has no PDF.');
+    }
     
     // Update button states
     $('#view-as-pdf')?.classList.add('active');
@@ -2846,7 +3002,7 @@ $('#filter-tag')?.addEventListener('change', rerenderLibrarySmart);
     }
   });
 
-  $('#wipe-data')?.addEventListener('click', () => {
+  $('#wipe-data')?.addEventListener('click', async () => {
     if (!confirm('This wipes all local study data in this browser. Continue?')) return;
     Object.values(KEY).forEach((k) => localStorage.removeItem(k));
     localStorage.removeItem('sd_units');
@@ -2856,6 +3012,7 @@ $('#filter-tag')?.addEventListener('change', rerenderLibrarySmart);
     localStorage.removeItem('sd_timetable');
     localStorage.removeItem('sd_todos');
     localStorage.removeItem('sd_issues');
+    try { await clearPdfStore(); } catch (_) {}
     location.reload();
   });
 
