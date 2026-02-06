@@ -2150,9 +2150,13 @@ $('#filter-tag')?.addEventListener('change', rerenderLibrarySmart);
     const src = $('#test-source')?.value;
     const tagEl = $('#test-tag');
     if (tagEl) tagEl.style.display = (src === 'tag') ? 'block' : 'none';
+    const mode = $('#test-mode')?.value || 'quiz';
+    const mixEl = $('#test-mix');
+    if (mixEl) mixEl.style.display = (mode === 'flashcards') ? 'none' : 'block';
   }
 
   $('#test-source')?.addEventListener('change', renderTestBuilderUI);
+  $('#test-mode')?.addEventListener('change', renderTestBuilderUI);
 
   $('#open-library-to-select')?.addEventListener('click', () => {
     show('library');
@@ -2178,6 +2182,7 @@ $('#filter-tag')?.addEventListener('change', rerenderLibrarySmart);
     const tag = $('#test-tag')?.value || '';
     const count = clamp(parseInt($('#test-count')?.value || '12', 10), 5, 50);
     const mix = $('#test-mix')?.value || 'balanced';
+    const testMode = $('#test-mode')?.value || 'quiz';
 
     // Unit name is what your Supabase rows store in `unit`
     const unit = activeUnitName();
@@ -2212,6 +2217,112 @@ $('#filter-tag')?.addEventListener('change', rerenderLibrarySmart);
     const touchedTags = new Set();
 
     const container = $('#test-session');
+    if (!container) return;
+
+    if (testMode === 'flashcards') {
+      const cards = qs.map((q) => {
+        if (q.type === 'mcq') {
+          return {
+            q: `${q.q}\n${(q.options || []).map((o, idx) => `${idx + 1}. ${o}`).join('\n')}`,
+            a: q.a,
+            tags: q.tags || []
+          };
+        }
+        if (q.type === 'cloze') {
+          return { q: q.q, a: q.a, tags: q.tags || [] };
+        }
+        return { q: q.q, a: q.hint || 'Review your notes for this item.', tags: q.tags || [] };
+      });
+
+      let idx = 0;
+      let flipped = false;
+      let shuffled = false;
+
+      const renderCard = () => {
+        const card = cards[idx];
+        if (!card) return;
+        const progress = `Card ${idx + 1}/${cards.length}`;
+        container.innerHTML = `
+          <div class="flashcard">
+            <div class="muted small">${progress}</div>
+            <div class="card-face" id="test-card-face">${escapeHtml(flipped ? card.a : card.q)}</div>
+            <div class="row gap wrap" style="margin-top:10px">
+              <button id="test-flip" class="secondary">${flipped ? 'Show question' : 'Show answer'}</button>
+              <div class="spacer"></div>
+              <button id="test-wrong" class="danger ghost">Again</button>
+              <button id="test-right">Know it</button>
+            </div>
+          </div>
+          <div class="row gap wrap" style="margin-top:10px">
+            <button id="test-prev" class="ghost">Prev</button>
+            <button id="test-next" class="ghost">Next</button>
+            <div class="spacer"></div>
+            <button id="test-shuffle" class="ghost">${shuffled ? 'Unshuffle' : 'Shuffle'}</button>
+          </div>
+          <div class="divider"></div>
+          <div class="muted small">Score: ${Math.round(correct * 10) / 10}/${idx}</div>
+        `;
+
+        $('#test-flip')?.addEventListener('click', () => {
+          flipped = !flipped;
+          renderCard();
+        });
+        $('#test-prev')?.addEventListener('click', () => {
+          idx = (idx - 1 + cards.length) % cards.length;
+          flipped = false;
+          renderCard();
+        });
+        $('#test-next')?.addEventListener('click', () => {
+          idx = (idx + 1) % cards.length;
+          flipped = false;
+          renderCard();
+        });
+        $('#test-right')?.addEventListener('click', () => {
+          correct += 1;
+          (card.tags || []).forEach((t) => touchedTags.add(t));
+          idx += 1;
+          flipped = false;
+          if (idx >= cards.length) return finishFlashcards();
+          renderCard();
+        });
+        $('#test-wrong')?.addEventListener('click', () => {
+          (card.tags || []).forEach((t) => touchedTags.add(t));
+          idx += 1;
+          flipped = false;
+          if (idx >= cards.length) return finishFlashcards();
+          renderCard();
+        });
+        $('#test-shuffle')?.addEventListener('click', () => {
+          shuffled = !shuffled;
+          if (shuffled) {
+            cards.sort(() => Math.random() - 0.5);
+            idx = 0;
+          } else {
+            idx = 0;
+          }
+          flipped = false;
+          renderCard();
+        });
+      };
+
+      const finishFlashcards = () => {
+        const pct = Math.round((correct / cards.length) * 100);
+        const delta = pct >= 80 ? 8 : pct >= 60 ? 4 : 2;
+        adjustMastery(Array.from(touchedTags), delta);
+        renderStats();
+        $('#learn-session').innerHTML = `<div><strong>Last test:</strong> ${pct}%</div><div class="muted small">Skills updated for: ${escapeHtml(Array.from(touchedTags).slice(0, 8).join(', ') || '—')}</div>`;
+        container.innerHTML = `
+          <div><strong>Finished.</strong></div>
+          <div class="muted small" style="margin-top:6px">Score: ${pct}%</div>
+          <div class="divider"></div>
+          <button id="test-again" class="secondary">Restart flashcards</button>
+        `;
+        $('#test-again')?.addEventListener('click', () => startTestSession());
+      };
+
+      renderCard();
+      return;
+    }
 
     const render = () => {
       const q = qs[i];
