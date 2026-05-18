@@ -1,13 +1,12 @@
 (() => {
   'use strict';
 
-  // ----------------------------
-  // Helpers (must be defined early)
-  // ----------------------------
-  // Supabase's onAuthStateChange can fire immediately (INITIAL_SESSION).
-  // Some auth handlers call cloudLoadAll(), which uses these helpers.
-  // If helpers are declared later, the script can crash on load and the UI
-  // will feel like “buttons do nothing”.
+  // ============================================
+  // JD Law Exam Prep - Simplified App
+  // Focus: Upload PDFs → Auto-Generate Flashcards & Quizzes
+  // ============================================
+
+  // DOM Helpers
   const $ = (sel) => document.querySelector(sel);
   const $$ = (sel) => Array.from(document.querySelectorAll(sel));
   const now = () => Date.now();
@@ -15,3125 +14,516 @@
   const clamp = (n, a, b) => Math.max(a, Math.min(b, n));
   const toISODate = (d = new Date()) => d.toISOString().slice(0, 10);
 
-  // ----------------------------
-  // Data model (client-side MVP)
-  // ----------------------------
-  // units: {id,name,created}
-  // items: {id, unitId, title, type, tags[], content, created, pinned:boolean}
-  // decks: {id, unitId, name, created, cards:[{id,q,a,box,due,stats:{seen,correct}}]}
-  // todos: {id, unitId, text, done, priority, due, created}
-  // timetable: {id, unitId, date, time, activity, created}
-  // issues: {id, unitId, text, done, created}
-  // mastery: {unitId, tag -> 0..100}
-  // streak: {lastDayISO, count}
-
-  // ========= Supabase (PRIVATE MODE) =========
-  const SUPABASE_URL = "https://ujwayetqmcvbqlckvjks.supabase.co";
-  const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVqd2F5ZXRxbWN2YnFsY2t2amtzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjgzNzM4NDksImV4cCI6MjA4Mzk0OTg0OX0.1v1MB3AgnmnmEY37C2p9KrwhCsMiG0yLV30-1jz4rP8";
-  const supabase = window.supabase?.createClient?.(SUPABASE_URL, SUPABASE_ANON_KEY);
-
-  let isAuthed = false;
-
-  function setOfflineIndicator(show, text = 'Offline mode') {
-    const el = document.getElementById('offline-indicator');
-    if (!el) return;
-    el.style.display = show ? 'inline-flex' : 'none';
-    el.textContent = text;
-  }
-
-  // Auth UI elements
-  const authEmail = document.getElementById("auth-email");
-  const authSend = document.getElementById("auth-send");
-  const authLogout = document.getElementById("auth-logout");
-  const authStatus = document.getElementById("auth-status");
-
-  // Require login for app
-  async function requireAuth() {
-    if (!supabase) {
-      authStatus && (authStatus.textContent = "Offline mode (Supabase not loaded). Sign in later to sync.");
-      authLogout && (authLogout.style.display = "none");
-      isAuthed = false;
-      setOfflineIndicator(true, 'Offline mode');
-      return null;
-    }
-    const { data } = await supabase.auth.getSession();
-    const session = data.session;
-    if (!session) {
-      authStatus && (authStatus.textContent = "Offline mode: log in to sync your private library.");
-      authLogout && (authLogout.style.display = "none");
-      isAuthed = false;
-      setOfflineIndicator(true, 'Offline mode');
-      return null;
-    }
-    authStatus && (authStatus.textContent = `Logged in: ${session.user.email}`);
-    authLogout && (authLogout.style.display = "inline-flex");
-    isAuthed = true;
-    setOfflineIndicator(false);
-    return session.user;
-  }
-
-  authSend?.addEventListener("click", async () => {
-    if (!supabase) return alert("Supabase not loaded. Add the supabase-js script tag in index.html.");
-    const email = (authEmail?.value || "").trim();
-    if (!email) return alert("Enter your email.");
-    setButtonLoading(authSend, true, 'Sending...');
-    try {
-      const { error } = await supabase.auth.signInWithOtp({
-        email,
-        options: {
-          emailRedirectTo: window.location.origin
-        }
-      });
-      if (error) return alert(error.message);
-      alert("Login link sent! Check your email.");
-    } finally {
-      setButtonLoading(authSend, false);
-    }
-  });
-
-  authLogout?.addEventListener("click", async () => {
-    await supabase.auth.signOut();
-    location.reload();
-  });
-
-  // Optional: cloud reload hook (no-op unless you implement full cloud Library sync)
- async function cloudLoadAll() {
-  // PRIVATE MODE: force login
-  const user = await requireAuth();
-  if (!user) return;
-
-  // 1) Refresh Library list from Supabase for active unit (by unit name string)
-  const unit = activeUnitName();
-  let rows = [];
-  try {
-    rows = await cloudFetchLibraryItems(unit);
-  } catch (err) {
-    console.error(err);
-    alert("Failed to load cloud library: " + (err?.message || err));
-    return;
-  }
-
-  // 2) Build tag set from cloud rows and refresh dropdowns
-  const tags = new Set();
-  rows.forEach(r => (r.tags || []).forEach(t => tags.add(t)));
-  const list = Array.from(tags).sort((a,b) => a.localeCompare(b));
-
-  const tagSel = $('#filter-tag');
-  const testTagSel = $('#test-tag');
-  const practiceSel = $('#practice-skill');
-
-  if (tagSel) tagSel.innerHTML = '<option value="">All topics</option>' + list.map(t => `<option value="${escapeHtml(t)}">${escapeHtml(t)}</option>`).join('');
-  if (testTagSel) testTagSel.innerHTML = '<option value="">Choose topic</option>' + list.map(t => `<option value="${escapeHtml(t)}">${escapeHtml(t)}</option>`).join('');
-  if (practiceSel) practiceSel.innerHTML = '<option value="">Choose a skill/topic</option>' + list.map(t => `<option value="${escapeHtml(t)}">${escapeHtml(t)}</option>`).join('');
-
-  // 3) Render Library list using cloud rows (NOT localStorage items)
-  const listEl = $('#library-list');
-  if (listEl) {
-    const typeFilter = $('#filter-type')?.value || '';
-    const tagFilter = $('#filter-tag')?.value || '';
-
-    const filtered = rows.filter((it) => {
-      const okType = typeFilter ? it.type === typeFilter : true;
-      const okTag = tagFilter ? (it.tags || []).includes(tagFilter) : true;
-      return okType && okTag;
-    });
-
-    listEl.innerHTML = '';
-    if (!filtered.length) {
-      listEl.innerHTML = '<div class="muted small">No cloud items yet. Upload a PDF/TXT.</div>';
-    } else {
-      filtered.forEach((it) => {
-        const div = document.createElement('div');
-        div.className = 'item';
-        div.dataset.id = it.id;
-
-        const tagsHtml = (it.tags || []).slice(0, 3).map((t) => `<span class="badge">${escapeHtml(t)}</span>`).join(' ');
-        div.innerHTML = `
-          <div class="row between">
-            <strong>${escapeHtml(it.title || 'Untitled')}</strong>
-            <div class="row gap">
-              <span class="badge">${escapeHtml(it.type || 'note')}</span>
-              ${it.storage_path ? '<span class="pill">PDF</span>' : ''}
-              <button class="danger ghost" style="padding:4px 8px; font-size:11px" data-delete-id="${it.id}">Delete</button>
-            </div>
-          </div>
-          <div class="muted small" style="margin-top:6px">${tagsHtml || '<span class="muted small">No tags</span>'}</div>
-        `;
-
-        // Delete button handler
-        const deleteBtn = div.querySelector('[data-delete-id]');
-        deleteBtn?.addEventListener('click', async (e) => {
-          e.stopPropagation(); // Don't trigger item open
-          if (!confirm(`Delete "${it.title || 'Untitled'}"?`)) return;
-          
-          try {
-            await cloudDeleteLibraryItem(it.id, it.storage_path);
-            await cloudLoadAll(); // Refresh list
-            toast(`Item "${it.title || 'Untitled'}" deleted.`);
-          } catch (err) {
-            console.error(err);
-            alert('Failed to delete item.');
-          }
-        });
-
-        // Click: open item in the existing viewer panel
-        div.addEventListener('click', async () => {
-  // Update title + meta
-  $('#open-item-title').textContent = it.title || 'Untitled';
-  $('#open-item-meta').textContent =
-    `${(it.type || '').toUpperCase()} • ${(it.tags || []).join(', ') || 'No tags'}`;
-
-  // Always show extracted text (used for study/tests)
-  $('#doc-body').textContent = it.content_text || '';
-
-  // PDF present → open book-style viewer
-  if (it.storage_path) {
-    try {
-      const signedUrl = await cloudSignedUrl(it.storage_path);
-      await pdfOpenFromUrl(signedUrl);
-    } catch (err) {
-      console.error(err);
-      alert("Could not load PDF preview.");
-      pdfShow(false);
-    }
-  } else {
-    // Not a PDF → hide PDF viewer
-    pdfShow(false);
-  }
-});
-
-
-        listEl.appendChild(div);
-      });
-
-      if (window.pdfjsLib) {
-  pdfjsLib.GlobalWorkerOptions.workerSrc =
-    "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.14.305/pdf.worker.min.js";
-}
-
-      // Auto open first item
-      const first = filtered[0];
-      if (first) {
-        $('#open-item-title').textContent = first.title || 'Untitled';
-        $('#open-item-meta').textContent = `${(first.type || '').toUpperCase()} • ${(first.tags || []).join(', ') || 'No tags'}`;
-        $('#doc-body').textContent = first.content_text || '';
-        // If it has a PDF, open the book viewer too
-        if (first.storage_path) {
-          try {
-            const signedUrl = await cloudSignedUrl(first.storage_path);
-            await pdfOpenFromUrl(signedUrl);
-          } catch (err) {
-            console.error(err);
-            pdfShow(false);
-          }
-        } else {
-          pdfShow(false);
-        }
-      }
-    }
-  }
-
-  // 4) Stats: items count now should come from cloud rows (per unit)
-  const statItems = $('#stat-items');
-  if (statItems) statItems.textContent = rows.length;
-
-  // due cards + streak are still local in your MVP
-  renderStats();
-
-  // 5) Skills display is still based on local mastery map
-  renderSkills();
-}
-
-  // Update UI when auth changes
-  supabase?.auth?.onAuthStateChange?.(() => {
-    requireAuth().then(() => {
-      cloudLoadAll();
-    });
-  });
-
+  // Storage
   const KEY = {
-    V: 'jdh_v',
     UNITS: 'jdh_units',
-    ITEMS: 'jdh_items',
-    DECKS: 'jdh_decks',
-    TODOS: 'jdh_todos',
-    TT: 'jdh_timetable',
-    ISSUES: 'jdh_issues',
-    MASTERY: 'jdh_mastery',
-    STREAK: 'jdh_streak',
-    SELECTED_FOR_TEST: 'jdh_selected_for_test',
-    CITATIONS: 'jdh_citations',
-    NOTES: 'jdh_notes',
-    LAST_VIEW: 'jdh_last_view'
+    MATERIALS: 'jdh_materials',
+    FLASHCARD_DECKS: 'jdh_decks',
+    FLASHCARDS: 'jdh_cards',
+    QUIZ_RESULTS: 'jdh_quiz_results'
   };
-
-  const VERSION = 2;
-
-  // ----------------------------
-  // Helpers
-  // ----------------------------
-  // (Declared at the top of the file.)
 
   function load(key, fallback) {
     try {
-      const raw = localStorage.getItem(key);
-      if (raw === null || raw === undefined) return fallback;
-      return JSON.parse(raw);
+      return JSON.parse(localStorage.getItem(key)) || fallback;
     } catch (_) {
       return fallback;
     }
   }
+
   function save(key, value) {
     localStorage.setItem(key, JSON.stringify(value));
   }
 
-  function escapeHtml(s) {
-    return (s || '').replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
-  }
-
-  function normaliseTags(input) {
-    return (input || '')
-      .split(',')
-      .map((t) => t.trim())
-      .filter(Boolean)
-      .slice(0, 20);
-  }
-
-  function safeFilename(name) {
-    return name.replace(/[^\w.\-]+/g, "_");
-  }
-
-  // Minimal toast helper (optional)
-  function toast(msg) {
-    // If you have a toast UI, plug it in. Otherwise fall back:
-    console.log(msg);
-  }
-
-  function setButtonLoading(btn, loading, loadingLabel = 'Working...') {
-    if (!btn) return;
-    if (!btn.dataset.label) btn.dataset.label = btn.textContent;
-    btn.disabled = loading;
-    btn.textContent = loading ? loadingLabel : btn.dataset.label;
-  }
-
-  // Local PDF persistence (IndexedDB)
-  const PDF_DB_NAME = 'jd_study_pdf_store';
-  const PDF_STORE = 'pdfs';
-  let _pdfDbPromise = null;
-
-  function openPdfDb() {
-    if (!window.indexedDB) return Promise.reject(new Error('IndexedDB not supported.'));
-    if (_pdfDbPromise) return _pdfDbPromise;
-    _pdfDbPromise = new Promise((resolve, reject) => {
-      const req = indexedDB.open(PDF_DB_NAME, 1);
-      req.onupgradeneeded = () => {
-        const db = req.result;
-        if (!db.objectStoreNames.contains(PDF_STORE)) {
-          db.createObjectStore(PDF_STORE, { keyPath: 'id' });
-        }
-      };
-      req.onsuccess = () => resolve(req.result);
-      req.onerror = () => reject(req.error || new Error('Failed to open IndexedDB.'));
-    });
-    return _pdfDbPromise;
-  }
-
-  async function savePdfBlob(blob, meta = {}) {
-    const db = await openPdfDb();
-    const id = uid();
-    return new Promise((resolve, reject) => {
-      const tx = db.transaction(PDF_STORE, 'readwrite');
-      tx.objectStore(PDF_STORE).put({ id, blob, name: meta.name || '', type: meta.type || blob.type, created: now() });
-      tx.oncomplete = () => resolve(id);
-      tx.onerror = () => reject(tx.error || new Error('Failed to save PDF.'));
-    });
-  }
-
-  async function getPdfBlob(id) {
-    if (!id) return null;
-    const db = await openPdfDb();
-    return new Promise((resolve, reject) => {
-      const tx = db.transaction(PDF_STORE, 'readonly');
-      const req = tx.objectStore(PDF_STORE).get(id);
-      req.onsuccess = () => resolve(req.result?.blob || null);
-      req.onerror = () => reject(req.error || new Error('Failed to load PDF.'));
-    });
-  }
-
-  async function deletePdfBlob(id) {
-    if (!id) return;
-    const db = await openPdfDb();
-    return new Promise((resolve, reject) => {
-      const tx = db.transaction(PDF_STORE, 'readwrite');
-      tx.objectStore(PDF_STORE).delete(id);
-      tx.oncomplete = () => resolve();
-      tx.onerror = () => reject(tx.error || new Error('Failed to delete PDF.'));
-    });
-  }
-
-  async function clearPdfStore() {
-    const db = await openPdfDb();
-    return new Promise((resolve, reject) => {
-      const tx = db.transaction(PDF_STORE, 'readwrite');
-      tx.objectStore(PDF_STORE).clear();
-      tx.oncomplete = () => resolve();
-      tx.onerror = () => reject(tx.error || new Error('Failed to clear PDF store.'));
-    });
-  }
-
-  function getCurrentLibraryItems() {
-    if (isAuthed && cloudCache.isReady) {
-      return cloudCache.items.map(rowToLocalShape);
-    }
-    return unitItems();
-  }
-// ----------------------------
-// PDF Book Viewer (pdf.js)
-// ----------------------------
-let _pdfDoc = null;
-let _pdfUrlForTab = null;
-let _pdfLocalUrl = null;
-let _pdfPage = 1;      // left page number
-let _pdfScale = 1.1;
-
-function pdfShow(show) {
-  const v = document.getElementById("pdf-view");
-  if (v) v.style.display = show ? "block" : "none";
-}
-
-function pdfUpdateIndicator() {
-  const ind = document.getElementById("pdf-page-indicator");
-  if (!ind || !_pdfDoc) return;
-  const left = _pdfPage;
-  const right = _pdfPage + 1;
-  ind.textContent = `Pages ${left}${right <= _pdfDoc.numPages ? `–${right}` : ""} / ${_pdfDoc.numPages}`;
-}
-
-async function pdfRenderPageToCanvas(pageNum, canvasId) {
-  const canvas = document.getElementById(canvasId);
-  if (!canvas) return;
-
-  const ctx = canvas.getContext("2d");
-
-  // Blank if out of range
-  if (!_pdfDoc || pageNum < 1 || pageNum > _pdfDoc.numPages) {
-    canvas.width = 10; canvas.height = 10;
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    return;
-  }
-
-  const page = await _pdfDoc.getPage(pageNum);
-  const viewport = page.getViewport({ scale: _pdfScale });
-
-  canvas.width = Math.floor(viewport.width);
-  canvas.height = Math.floor(viewport.height);
-
-  await page.render({ canvasContext: ctx, viewport }).promise;
-}
-
-async function pdfRenderSpread() {
-  if (!_pdfDoc) return;
-  pdfUpdateIndicator();
-  await pdfRenderPageToCanvas(_pdfPage, "pdf-canvas-left");
-  await pdfRenderPageToCanvas(_pdfPage + 1, "pdf-canvas-right");
-}
-
-async function pdfOpenFromUrl(url) {
-  if (!window.pdfjsLib) {
-    alert("pdf.js not loaded. Check your script tags.");
-    return;
-  }
-
-  try {
-    pdfjsLib.GlobalWorkerOptions.workerSrc =
-      "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.14.305/pdf.worker.min.js";
-  } catch (_) {}
-
-  _pdfUrlForTab = url;
-  if (_pdfLocalUrl) {
-    URL.revokeObjectURL(_pdfLocalUrl);
-    _pdfLocalUrl = null;
-  }
-
-  const loadingTask = pdfjsLib.getDocument({ url });
-  _pdfDoc = await loadingTask.promise;
-
-  _pdfPage = 1;
-  pdfShow(true);
-  await pdfRenderSpread();
-}
-
-// Controls
-document.getElementById("pdf-prev")?.addEventListener("click", async () => {
-  if (!_pdfDoc) return;
-  _pdfPage = Math.max(1, _pdfPage - 2);
-  await pdfRenderSpread();
-});
-
-document.getElementById("pdf-next")?.addEventListener("click", async () => {
-  if (!_pdfDoc) return;
-  _pdfPage = Math.min(_pdfDoc.numPages, _pdfPage + 2);
-  if (_pdfPage % 2 === 0) _pdfPage = Math.max(1, _pdfPage - 1);
-  await pdfRenderSpread();
-});
-
-document.getElementById("pdf-zoom")?.addEventListener("input", async (e) => {
-  const pct = parseInt(e.target.value, 10);
-  document.getElementById("pdf-zoom-label").textContent = `${pct}%`;
-  _pdfScale = pct / 100;
-  await pdfRenderSpread();
-});
-
-document.getElementById("pdf-open-new")?.addEventListener("click", () => {
-  if (_pdfUrlForTab) window.open(_pdfUrlForTab, "_blank");
-});
-
-  async function openCloudPdfInViewer(item) {
-  if (!item?.storage_path) {
-    alert("This item has no PDF stored.");
-    return;
-  }
-
-  const user = await requireAuth();
-  if (!user) return;
-
-  const url = await cloudSignedUrl(item.storage_path);
-  await pdfOpenFromUrl(url);
-}
-
-async function openLocalPdfInViewer(item) {
-  if (!item?.pdf_blob_id) {
-    alert("This item has no locally saved PDF.");
-    return;
-  }
-  const blob = await getPdfBlob(item.pdf_blob_id);
-  if (!blob) {
-    alert("Local PDF not found. It may have been cleared from browser storage.");
-    return;
-  }
-  if (_pdfLocalUrl) URL.revokeObjectURL(_pdfLocalUrl);
-  _pdfLocalUrl = URL.createObjectURL(blob);
-  await pdfOpenFromUrl(_pdfLocalUrl);
-}
-
-// Cloud-first mode glue
-// ============================
-let cloudCache = {
-  isReady: false,
-  items: [],     // rows from Supabase for active unit (and/or all units)
-  byId: new Map()
-};
-
-async function isLoggedIn() {
-  if (!supabase) return false;
-  const { data } = await supabase.auth.getSession();
-  return !!data?.session;
-}
-
-// Normalize a Supabase row into the shape your app already expects.
-function rowToLocalShape(r) {
-  return {
-    id: r.id,
-    unitId: activeUnitId,                 // keep your internal unitId
-    title: r.title || "Untitled",
-    type: r.type || "note",
-    tags: Array.isArray(r.tags) ? r.tags : [],
-    content: r.content_text || "",        // your app expects `content`
-    created: r.created_at ? new Date(r.created_at).getTime() : now(),
-    pinned: false,
-    // keep original row fields if needed:
-    _cloud: true,
-    storage_path: r.storage_path || null
-  };
-}
-
-// Replace your local unitItems() to prefer cloud when logged in
-async function unitItemsSmart() {
-  const logged = await isLoggedIn();
-  if (logged && cloudCache.isReady) {
-    return cloudCache.items.map(rowToLocalShape);
-  }
-  return unitItems(); // your existing local function
-}
-
-
-  // ----------------------------
-  // Supabase storage + DB helpers
-  // ----------------------------
-  async function cloudUploadPdf(file) {
-    const user = await requireAuth();
-    if (!user) throw new Error("Not logged in.");
-
-    const path = `${user.id}/${Date.now()}_${safeFilename(file.name)}`;
-
-    const { error } = await supabase
-      .storage
-      .from("library")
-      .upload(path, file, { contentType: "application/pdf", upsert: false });
-
-    if (error) throw error;
-    return path;
-  }
-
-  async function cloudSignedUrl(storagePath) {
-    const { data, error } = await supabase
-      .storage
-      .from("library")
-      .createSignedUrl(storagePath, 60 * 30); // 30 minutes
-
-    if (error) throw error;
-    return data.signedUrl;
-  }
-
-  async function cloudInsertLibraryItem(item) {
-    const user = await requireAuth();
-    if (!user) throw new Error("Not logged in.");
-
-    const payload = { ...item, user_id: user.id };
-    const { error } = await supabase.from("library_items").insert(payload);
-    if (error) throw error;
-  }
-
-  async function cloudFetchLibraryItems(unit) {
-  const user = await requireAuth();
-  if (!user) return [];
-
-  const q = supabase
-    .from("library_items")
-    .select("*")
-    .eq("user_id", user.id)
-    .order("created_at", { ascending: false });
-
-  // IMPORTANT: this assumes your table column is named `unit`
-  const { data, error } = unit ? await q.eq("unit", unit) : await q;
-
-  if (error) throw error;
-
-  const rows = data || [];
-  cloudCache.items = rows;
-  cloudCache.byId = new Map(rows.map(r => [r.id, r]));
-  cloudCache.isReady = true;
-
-  return rows;
-}
-
-
-  async function cloudDeleteLibraryItem(id, storagePath) {
-    const user = await requireAuth();
-    if (!user) throw new Error("Not logged in.");
-
-    const { error: dbErr } = await supabase
-      .from("library_items")
-      .delete()
-      .eq("id", id)
-      .eq("user_id", user.id);
-
-    if (dbErr) throw dbErr;
-
-    if (storagePath) {
-      const { error: stErr } = await supabase.storage.from("library").remove([storagePath]);
-      if (stErr) console.warn("Storage delete failed:", stErr.message);
-    }
-  }
-
-  // ✅ Seamless Library → Tests: corpus only from Supabase rows
-  async function getTestCorpus({ unit, tag, selectedIds }) {
-    const items = await cloudFetchLibraryItems(unit);
-
-    let filtered = items;
-
-    if (tag) {
-      filtered = filtered.filter(it => (it.tags || []).includes(tag));
-    }
-
-    if (selectedIds && selectedIds.length) {
-      const set = new Set(selectedIds);
-      filtered = filtered.filter(it => set.has(it.id));
-    }
-
-    // Only include items with text
-    filtered = filtered.filter(it => (it.content_text || "").trim().length > 0);
-
-    // Return combined corpus text
-    const corpus = filtered.map(it => it.content_text).join("\n\n");
-    return { items: filtered, corpus };
-  }
-
-  // ----------------------------
-  // Migration from older demo
-  // ----------------------------
-  function migrateIfNeeded() {
-    const v = load(KEY.V, 0);
-
-    if (v >= VERSION) return;
-
-    const oldUnits = load('sd_units', []);
-    const oldDocs = load('sd_docs', []);
-    const oldLectures = load('sd_lectures', []);
-    const oldDecks = load('sd_decks', []);
-    const oldTT = load('sd_timetable', []);
-    const oldTodos = load('sd_todos', []);
-    const oldIssues = load('sd_issues', []);
-
-    let units = load(KEY.UNITS, []);
-    let items = load(KEY.ITEMS, []);
-    let decks = load(KEY.DECKS, []);
-    let timetable = load(KEY.TT, []);
-    let todos = load(KEY.TODOS, []);
-    let issues = load(KEY.ISSUES, []);
-    let mastery = load(KEY.MASTERY, {});
-    let streak = load(KEY.STREAK, { lastDayISO: null, count: 0 });
-
-    const newEmpty = units.length === 0 && items.length === 0 && decks.length === 0;
-
-    if (newEmpty && (oldDocs.length || oldLectures.length || oldUnits.length)) {
-      if (oldUnits.length) {
-        units = oldUnits.map((u) => ({ id: u.id || uid(), name: u.name, created: now() }));
-      } else {
-        units = [{ id: uid(), name: 'My Unit', created: now() }];
-      }
-
-      const fallbackUnit = units[0].id;
-
-      const mapOld = (d, type) => ({
-        id: d.id || uid(),
-        unitId: fallbackUnit,
-        title: d.title || 'Untitled',
-        type,
-        tags: [],
-        content: d.content || '',
-        created: d.created || now(),
-        pinned: false
-      });
-      const fromDocs = oldDocs.map((d) => mapOld(d, d.isCase ? 'case' : 'note'));
-      const fromLectures = oldLectures.map((l) => mapOld(l, 'lecture'));
-      items = [...fromDocs, ...fromLectures];
-
-      decks = oldDecks.map((dk) => ({
-        id: dk.id || uid(),
-        unitId: fallbackUnit,
-        name: dk.name || 'Deck',
-        created: now(),
-        cards: (dk.cards || []).map((c) => ({
-          id: uid(),
-          q: c.q,
-          a: c.a,
-          box: c.known ? 3 : 1,
-          due: toISODate(new Date()),
-          stats: { seen: 0, correct: 0 }
-        }))
-      }));
-
-      timetable = oldTT.map((t) => ({
-        id: t.id || uid(),
-        unitId: fallbackUnit,
-        date: t.date,
-        time: t.time,
-        activity: t.activity,
-        created: now()
-      }));
-
-      todos = oldTodos.map((t) => ({
-        id: t.id || uid(),
-        unitId: fallbackUnit,
-        text: t.text,
-        done: !!t.done,
-        priority: 'med',
-        due: '',
-        created: now()
-      }));
-
-      issues = oldIssues.map((it) => ({
-        id: it.id || uid(),
-        unitId: fallbackUnit,
-        text: it.text,
-        done: !!it.done,
-        created: now()
-      }));
-
-      mastery[fallbackUnit] = mastery[fallbackUnit] || {};
-      save(KEY.UNITS, units);
-      save(KEY.ITEMS, items);
-      save(KEY.DECKS, decks);
-      save(KEY.TT, timetable);
-      save(KEY.TODOS, todos);
-      save(KEY.ISSUES, issues);
-      save(KEY.MASTERY, mastery);
-      save(KEY.STREAK, streak);
-    }
-
-    save(KEY.V, VERSION);
-  }
-
-  // ----------------------------
-  // App state
-  // ----------------------------
-  migrateIfNeeded();
-
+  // State
   let units = load(KEY.UNITS, []);
-  let items = load(KEY.ITEMS, []);
-  let decks = load(KEY.DECKS, []);
-  let timetable = load(KEY.TT, []);
-  let todos = load(KEY.TODOS, []);
-  let issues = load(KEY.ISSUES, []);
-  let mastery = load(KEY.MASTERY, {});
-  let streak = load(KEY.STREAK, { lastDayISO: null, count: 0 });
-  let selectedForTest = load(KEY.SELECTED_FOR_TEST, []);
-
-  let citations = load(KEY.CITATIONS, []);
-  let notes = load(KEY.NOTES, []);
-
+  let materials = load(KEY.MATERIALS, []);
+  let decks = load(KEY.FLASHCARD_DECKS, []);
+  let cards = load(KEY.FLASHCARDS, []);
   let activeUnitId = null;
-  let openItemId = null;
-  let openNoteId = null;
-  let notesUnitId = null;
+  let currentOpenMaterialId = null;
 
-  // ----------------------------
-  // Router / navigation
-  // ----------------------------
-  const views = {
-    units: $('#view-units'),
-    library: $('#view-library'),
-    notes: $('#view-notes'),
-    learn: $('#view-learn'),
-    flashcards: $('#view-flashcards'),
-    tests: $('#view-tests'),
-    citations: $('#view-citations'),
-    timetable: $('#view-timetable'),
-    tasks: $('#view-tasks'),
-    exampack: $('#view-exampack'),
-    settings: $('#view-settings')
-  };
-
-  function show(viewName) {
-  Object.entries(views).forEach(([k, el]) => {
-    if (!el) return; // ignore missing views
-    el.style.display = (k === viewName) ? 'block' : 'none';
-  });
-
-  $$('.nav-btn').forEach((b) => {
-    b.classList.toggle('active', b.dataset.view === viewName);
-  });
-
-  if (views[viewName]) {
-    save(KEY.LAST_VIEW, viewName);
-    views[viewName].scrollTop = 0;
-  }
-}
-
-
-  // ----------------------------
-// Router / navigation (SAFE)
-// ----------------------------
-const PRIVATE_VIEWS = new Set([
-  'library',
-  'notes',
-  'learn',
-  'flashcards',
-  'tests',
-  'citations',
-  'timetable',
-  'tasks',
-  'exampack',
-  'settings'
-]);
-
-async function go(viewName) {
-  // Always show instantly (prevents “stuck” UI)
-  show(viewName);
-
-  // If this view is private, require login
-  if (PRIVATE_VIEWS.has(viewName)) {
-    const user = await requireAuth();
-    if (!user) return; // Offline/local mode still works without cloud
-
-    // If logged in, refresh cloud-driven parts when needed
-    if (viewName === 'library' || viewName === 'tests' || viewName === 'learn') {
-      try { await cloudLoadAll(); } catch (e) { console.error(e); }
-    }
-  }
-}
-
-$$('.nav-btn').forEach((btn) => {
-  btn.addEventListener('click', () => {
-    const view = btn.dataset.view;
-    // run async without blocking click event
-    go(view);
-  });
-});
-
-
-  // ----------------------------
-  // Theme toggle
-  // ----------------------------
-  $('#theme-toggle')?.addEventListener('click', () => {
-    document.body.classList.toggle('theme-light');
-    document.body.classList.toggle('theme-default');
-  });
-
-  // ----------------------------
-  // Sidebar toggle
-  // ----------------------------
-  $('#sidebar-toggle')?.addEventListener('click', () => {
-    const sidebar = $('.sidebar');
-    const toggle = $('#sidebar-toggle');
-    if (sidebar && toggle) {
-      sidebar.classList.toggle('minimized');
-      toggle.textContent = sidebar.classList.contains('minimized') ? '▶' : '◀';
-      toggle.title = sidebar.classList.contains('minimized') ? 'Expand sidebar' : 'Minimize sidebar';
-    }
-  });
-
-  // ----------------------------
-  // Units
-  // ----------------------------
+  // ============================================
+  // UNIT MANAGEMENT
+  // ============================================
+  
   function ensureDefaultUnit() {
-    if (!units.length) {
-      units = [
-        { id: uid(), name: 'Contracts', created: now() },
-        { id: uid(), name: 'Torts', created: now() },
-        { id: uid(), name: 'Criminal Law', created: now() },
-        { id: uid(), name: 'Public Law', created: now() }
-      ];
+    if (units.length === 0) {
+      units.push({ id: uid(), name: 'Contracts', created: now() });
       save(KEY.UNITS, units);
+      activeUnitId = units[0].id;
     }
-    activeUnitId = activeUnitId || units[0].id;
+    if (!activeUnitId && units.length > 0) {
+      activeUnitId = units[0].id;
+    }
   }
 
   function renderUnitSelect() {
     const sel = $('#active-unit');
     if (!sel) return;
-    sel.innerHTML = '';
-    units.forEach((u) => {
-      const opt = document.createElement('option');
-      opt.value = u.id;
-      opt.textContent = u.name;
-      sel.appendChild(opt);
-    });
-    sel.value = activeUnitId;
+    sel.innerHTML = units.map(u => `<option value="${u.id}">${u.name}</option>`).join('');
+    if (activeUnitId) sel.value = activeUnitId;
   }
 
   $('#active-unit')?.addEventListener('change', (e) => {
     activeUnitId = e.target.value;
-    openItemId = null;
-    openNoteId = null;
-    selectedForTest = [];
-    save(KEY.SELECTED_FOR_TEST, selectedForTest);
-    if (!notesUnitId) notesUnitId = activeUnitId;
-    refreshAll();
+    renderMaterials();
   });
 
   $('#add-unit')?.addEventListener('click', () => {
-    const name = ($('#new-unit-input')?.value || '').trim();
-    if (!name) return;
-    const u = { id: uid(), name, created: now() };
-    units.push(u);
+    const name = $('#new-unit-input')?.value?.trim();
+    if (!name) return alert('Enter subject name');
+    units.push({ id: uid(), name, created: now() });
     save(KEY.UNITS, units);
     $('#new-unit-input').value = '';
-    activeUnitId = u.id;
-    if (!notesUnitId) notesUnitId = u.id;
     renderUnitSelect();
-    refreshAll();
   });
 
   $('#delete-unit')?.addEventListener('click', async () => {
-    if (units.length <= 1) {
-      return alert('Cannot delete the last unit. You must have at least one unit.');
-    }
-    
-    const currentUnit = units.find(u => u.id === activeUnitId);
-    if (!currentUnit) return;
-    
-    const confirmMsg = `Delete unit "${currentUnit.name}"? This will also delete:\n- All library items\n- All flashcard decks\n- All tasks\n- All timetable entries\n- All exam pack items\n\nThis action cannot be undone.`;
-    
-    if (!confirm(confirmMsg)) return;
-    
-    // Remove unit
+    if (!activeUnitId) return;
+    if (!confirm('Delete this subject and all its materials?')) return;
     units = units.filter(u => u.id !== activeUnitId);
-    
-    // Remove associated data
-    const removedItems = items.filter(item => item.unitId === activeUnitId);
-    for (const it of removedItems) {
-      if (it.pdf_blob_id) {
-        try { await deletePdfBlob(it.pdf_blob_id); } catch (_) {}
-      }
-    }
-    items = items.filter(item => item.unitId !== activeUnitId);
-    decks = decks.filter(deck => deck.unitId !== activeUnitId);
-    todos = todos.filter(todo => todo.unitId !== activeUnitId);
-    timetable = timetable.filter(tt => tt.unitId !== activeUnitId);
-    issues = issues.filter(issue => issue.unitId !== activeUnitId);
-    notes = notes.filter(note => note.unitId !== activeUnitId);
-    
-    // Remove mastery data for this unit
-    if (mastery[activeUnitId]) {
-      delete mastery[activeUnitId];
-    }
-    
-    // Save everything
+    materials = materials.filter(m => m.unitId !== activeUnitId);
     save(KEY.UNITS, units);
-    save(KEY.ITEMS, items);
-    save(KEY.DECKS, decks);
-    save(KEY.TODOS, todos);
-    save(KEY.TT, timetable);
-    save(KEY.ISSUES, issues);
-    save(KEY.MASTERY, mastery);
-    save(KEY.NOTES, notes);
-    
-    // Switch to first remaining unit
-    activeUnitId = units[0].id;
-    if (!notesUnitId || notesUnitId === currentUnit.id) {
-      notesUnitId = activeUnitId;
-    }
-    
-    // Refresh UI
+    save(KEY.MATERIALS, materials);
+    activeUnitId = units[0]?.id || null;
     renderUnitSelect();
-    await cloudLoadAll();
-    refreshAll();
-    
-    toast(`Unit "${currentUnit.name}" deleted successfully.`);
+    renderMaterials();
   });
 
-  // ----------------------------
-  // Library: adding / uploading (LOCAL MVP)
-  // ----------------------------
+  // ============================================
+  // MATERIAL UPLOAD & EXTRACTION
+  // ============================================
+
   async function extractTextFromPDF(file) {
-    try {
-      if (!window.pdfjsLib) {
-        alert('pdf.js not loaded. Run via a local web server (see footer).');
-        return '';
-      }
-      const arrayBuffer = await file.arrayBuffer();
-      const loading = pdfjsLib.getDocument({ data: arrayBuffer });
-      const doc = await loading.promise;
-      let full = '';
-      for (let i = 1; i <= doc.numPages; i++) {
-        const page = await doc.getPage(i);
-        const content = await page.getTextContent();
-        full += content.items.map((it) => it.str).join(' ') + '\n\n';
-      }
-      return full.trim();
-    } catch (err) {
-      console.error('PDF extract error', err);
-      return '';
-    }
+    return new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onload = async (e) => {
+        try {
+          const data = new Uint8Array(e.target.result);
+          const pdf = await pdfjsLib.getDocument(data).promise;
+          let text = '';
+          for (let i = 1; i <= pdf.numPages; i++) {
+            const page = await pdf.getPage(i);
+            const content = await page.getTextContent();
+            text += content.items.map(item => item.str).join(' ') + '\n';
+          }
+          resolve(text);
+        } catch (err) {
+          console.error('PDF extraction error:', err);
+          resolve('');
+        }
+      };
+      reader.readAsArrayBuffer(file);
+    });
   }
-
-  function addItem({ title, type, tags, content }) {
-    const it = {
-      id: uid(),
-      unitId: activeUnitId,
-      title: title || 'Untitled',
-      type: type || 'note',
-      tags: Array.isArray(tags) ? tags : [],
-      content: content || '',
-      created: now(),
-      pinned: false
-    };
-    items.unshift(it);
-    save(KEY.ITEMS, items);
-    return it;
-  }
-
-  $('#add-text-item')?.addEventListener('click', () => {
-    const title = ($('#item-title')?.value || '').trim() || 'Untitled';
-    const type = $('#item-type')?.value || 'note';
-    const tags = normaliseTags($('#item-tags')?.value || '');
-    const it = addItem({ title, type, tags, content: '' });
-    $('#item-title').value = '';
-    $('#item-tags').value = '';
-    openLibraryItem(it.id);
-    renderLibrary();
-    renderTags();
-  });
 
   $('#file-input')?.addEventListener('change', async (e) => {
-  const files = Array.from(e.target.files || []);
-  if (!files.length) return;
+    const files = e.target.files;
+    if (!files.length || !activeUnitId) return;
 
-  const uploadStatus = $('#upload-status');
-  const fileInput = $('#file-input');
-  if (fileInput) fileInput.disabled = true;
-  if (uploadStatus) uploadStatus.textContent = 'Uploading...';
-
-  // Cloud if logged in; otherwise save locally in browser storage
-  const user = await requireAuth();
-  const useCloud = !!user;
-  if (!useCloud && !window.indexedDB) {
-    alert('Offline PDF saving requires IndexedDB support in this browser.');
-    e.target.value = '';
-    if (uploadStatus) uploadStatus.textContent = '';
-    if (fileInput) fileInput.disabled = false;
-    return;
-  }
-
-  const type = $('#item-type')?.value || 'note';
-  const tags = normaliseTags($('#item-tags')?.value || '');
-  const unit = activeUnitName(); // Supabase stores unit as string
-
-  for (const file of files) {
-    const isPDF = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
-    const isTXT = file.type === 'text/plain' || file.name.toLowerCase().endsWith('.txt');
-
-    try {
-      if (isPDF) {
-        // 1) Extract text locally (pdf.js)
-        const extractedText = await extractTextFromPDF(file);
-
-        if (useCloud) {
-          // 2) Upload PDF to Supabase Storage
-          const storage_path = await cloudUploadPdf(file);
-
-          // 3) Insert metadata + extracted text into Supabase table
-          await cloudInsertLibraryItem({
-            unit,
-            title: file.name,
-            type,
-            tags,
-            storage_path,
-            content_text: extractedText
-          });
-
-          toast(`Uploaded PDF: ${file.name}`);
-        } else {
-          const pdf_blob_id = await savePdfBlob(file, { name: file.name, type: file.type });
-          const it = {
-            id: uid(),
-            unitId: activeUnitId,
-            title: file.name,
-            type,
-            tags,
-            content: extractedText,
-            created: now(),
-            pinned: false,
-            pdf_blob_id
-          };
-          items.unshift(it);
-          save(KEY.ITEMS, items);
-          toast(`Saved PDF locally: ${file.name}`);
-        }
-      } else if (isTXT) {
-        // 1) Read text
-        const content_text = await file.text();
-
-        if (useCloud) {
-          // 2) Insert into Supabase table (no storage file)
-          await cloudInsertLibraryItem({
-            unit,
-            title: file.name,
-            type,
-            tags,
-            storage_path: null,
-            content_text
-          });
-
-          toast(`Uploaded TXT: ${file.name}`);
-        } else {
-          const it = {
-            id: uid(),
-            unitId: activeUnitId,
-            title: file.name,
-            type,
-            tags,
-            content: content_text,
-            created: now(),
-            pinned: false
-          };
-          items.unshift(it);
-          save(KEY.ITEMS, items);
-          toast(`Saved TXT locally: ${file.name}`);
-        }
+    const progress = $('#upload-progress');
+    for (const file of files) {
+      progress.textContent = `Processing ${file.name}...`;
+      let text = '';
+      if (file.type === 'application/pdf') {
+        text = await extractTextFromPDF(file);
       } else {
-        alert(`Unsupported file: ${file.name}\nOnly PDF and TXT are supported.`);
+        text = await file.text();
       }
-    } catch (err) {
-      console.error(err);
-      alert(`Upload failed for ${file.name}: ${err?.message || err}`);
+
+      const material = {
+        id: uid(),
+        unitId: activeUnitId,
+        title: file.name.replace(/\.[^.]+$/, ''),
+        type: 'lecture',
+        content: text,
+        created: now()
+      };
+      materials.push(material);
+      
+      // Auto-generate flashcards from material
+      autoGenerateFlashcards(material);
     }
-  }
 
-  e.target.value = '';
-  // Refresh UI
-  if (useCloud && typeof cloudLoadAll === "function") await cloudLoadAll();
-  if (!useCloud) {
-    renderLibrary();
-    renderTags();
+    save(KEY.MATERIALS, materials);
+    save(KEY.FLASHCARD_DECKS, decks);
+    save(KEY.FLASHCARDS, cards);
+    
+    progress.textContent = `✅ Processed ${files.length} file(s)`;
+    $('#file-input').value = '';
+    renderMaterials();
     renderStats();
+    setTimeout(() => progress.textContent = '', 2000);
+  });
+
+  // ============================================
+  // AUTO-GENERATE FLASHCARDS FROM PDF
+  // ============================================
+
+  function autoGenerateFlashcards(material) {
+    // Extract key sentences/concepts from material
+    const sentences = material.content.split(/[.!?]+/).filter(s => s.trim().length > 20);
+    const deckId = uid();
+    
+    const deck = {
+      id: deckId,
+      unitId: material.unitId,
+      name: `${material.title} - Auto Generated`,
+      sourceId: material.id,
+      created: now()
+    };
+    decks.push(deck);
+
+    // Generate Q&A pairs from sentences (simple heuristic)
+    const generatedCards = [];
+    for (let i = 0; i < Math.min(sentences.length, 15); i++) {
+      const sentence = sentences[i].trim();
+      if (sentence.length < 30) continue;
+
+      // Simple Q&A generation heuristic
+      let question = sentence;
+      let answer = sentence;
+
+      // Try to identify a question pattern
+      if (sentence.includes('is ')) {
+        const parts = sentence.split(' is ');
+        question = `What is ${parts[0]}?`;
+        answer = parts[1] || sentence;
+      } else if (sentence.includes('are ')) {
+        const parts = sentence.split(' are ');
+        question = `What are ${parts[0]}?`;
+        answer = parts[1] || sentence;
+      } else if (sentence.includes('can ')) {
+        question = `${sentence}?`;
+        answer = 'True/False: ' + sentence;
+      }
+
+      generatedCards.push({
+        id: uid(),
+        deckId,
+        q: question.substring(0, 200),
+        a: answer.substring(0, 300),
+        box: 1,
+        due: now(),
+        stats: { seen: 0, correct: 0 }
+      });
+    }
+
+    cards.push(...generatedCards);
   }
-  if (uploadStatus) uploadStatus.textContent = '';
-  if (fileInput) fileInput.disabled = false;
-});
 
+  // ============================================
+  // MATERIAL MANAGEMENT
+  // ============================================
 
-  // ----------------------------
-  // Library: list / open / edit
-  // ----------------------------
-  function unitItems() {
-    return items.filter((it) => it.unitId === activeUnitId);
+  function unitMaterials() {
+    return materials.filter(m => m.unitId === activeUnitId);
   }
 
-  function openLibraryItem(id) {
-  // 1) Try local
-  let it = items.find((x) => x.id === id);
-
-  // 2) If not found, try cloud cache
-  if (!it && cloudCache.byId?.has(id)) {
-    it = rowToLocalShape(cloudCache.byId.get(id));
-  }
-
-  if (!it) return;
-
-  openItemId = it.id;
-  $('#open-item-title').textContent = it.title;
-  $('#open-item-meta').textContent =
-    `${(it.type || 'note').toUpperCase()} • ${(it.tags || []).join(', ') || 'No tags'} • ${new Date(it.created).toLocaleString()}`;
-
-  // Show/hide view mode toggle for PDF items
-  const viewModeToggle = $('#view-mode-toggle');
-  const isPdf = (it._cloud && it.storage_path && it.storage_path.toLowerCase().endsWith('.pdf')) || !!it.pdf_blob_id;
-  if (viewModeToggle) {
-    viewModeToggle.style.display = isPdf ? 'flex' : 'none';
-  }
-  
-  // Default to text view
-  const body = $('#doc-body');
-  body.style.display = 'block';
-  body.textContent = it.content || '';
-  pdfShow(false);
-  
-  // Update toggle button states
-  $('#view-as-text')?.classList.add('active');
-  $('#view-as-pdf')?.classList.remove('active');
-
-  // IMPORTANT: use content not content_text here; we normalized it
-  $('#summary').textContent = '—';
-  $('#concepts').innerHTML = '';
-}
-
-
-  function renderLibrary() {
+  function renderMaterials() {
     const list = $('#library-list');
     if (!list) return;
 
-    const typeFilter = $('#filter-type')?.value || '';
-    const tagFilter = $('#filter-tag')?.value || '';
-    const filtered = getCurrentLibraryItems().filter((it) => {
-      const okType = typeFilter ? it.type === typeFilter : true;
-      const okTag = tagFilter ? (it.tags || []).includes(tagFilter) : true;
-      return okType && okTag;
-    });
-
-    list.innerHTML = '';
-    if (!filtered.length) {
-      list.innerHTML = '<div class="muted small">No items yet. Upload a lecture, case, tutorial or note.</div>';
-      return;
-    }
-
-    filtered.forEach((it) => {
-      const div = document.createElement('div');
-      div.className = 'item';
-      div.dataset.id = it.id;
-
-      const tags = (it.tags || []).slice(0, 3).map((t) => `<span class="badge">${escapeHtml(t)}</span>`).join(' ');
-      const pin = it.pinned ? '<span class="pill">Pinned</span>' : '';
-      const pdfPill = (it.storage_path || it.pdf_blob_id) ? '<span class="pill">PDF</span>' : '';
-      div.innerHTML = `
-        <div class="row between">
-          <strong>${escapeHtml(it.title)}</strong>
-          <div class="row gap">${pin}${pdfPill}<span class="badge">${escapeHtml(it.type)}</span><button class="danger ghost" style="padding:4px 8px; font-size:11px" data-delete-id="${it.id}">Delete</button></div>
-        </div>
-        <div class="muted small" style="margin-top:6px">${tags || '<span class="muted small">No tags</span>'}</div>
-      `;
-
-      // Delete button handler
-      const deleteBtn = div.querySelector('[data-delete-id]');
-      deleteBtn?.addEventListener('click', async (e) => {
-        e.stopPropagation(); // Don't trigger item open
-        if (!confirm(`Delete "${it.title}"?`)) return;
-        if (it._cloud) {
-          await cloudDeleteLibraryItem(it.id, it.storage_path);
-          await cloudLoadAll();
-        } else {
-          if (it.pdf_blob_id) {
-            await deletePdfBlob(it.pdf_blob_id);
-          }
-          items = items.filter(i => i.id !== it.id);
-          save(KEY.ITEMS, items);
-          renderLibrary();
-        }
-        renderStats();
-        // Clear open item if it was deleted
-        if (openItemId === it.id) {
-          openItemId = null;
-          $('#doc-body').textContent = '';
-          $('#open-item-title').textContent = 'Select an item';
-          $('#open-item-meta').textContent = '';
-          pdfShow(false);
-        }
-        toast(`Item "${it.title}" deleted.`);
-      });
-
-      div.addEventListener('click', () => {
-        openLibraryItem(it.id);
-      });
-
-      list.appendChild(div);
-    });
-
-    if (!openItemId && filtered[0]) openLibraryItem(filtered[0].id);
+    const unitMats = unitMaterials();
+    list.innerHTML = unitMats.map(m => `
+      <div class="item" data-id="${m.id}" onclick="openMaterial('${m.id}')">
+        <strong>${m.title}</strong>
+        <div class="muted small">${new Date(m.created).toLocaleDateString()}</div>
+      </div>
+    `).join('');
   }
 
-async function rerenderLibrarySmart() {
-  const logged = await isLoggedIn();
-  if (logged) return cloudLoadAll();
-  return renderLibrary();
-}
+  window.openMaterial = (id) => {
+    currentOpenMaterialId = id;
+    const material = materials.find(m => m.id === id);
+    if (!material) return;
 
-$('#filter-type')?.addEventListener('change', rerenderLibrarySmart);
-$('#filter-tag')?.addEventListener('change', rerenderLibrarySmart);
-
-
-  // Edit toggle
-  $('#toggle-edit')?.addEventListener('click', () => {
     const body = $('#doc-body');
-    if (!body) return;
-    const isEditing = body.getAttribute('contenteditable') === 'true';
-    body.setAttribute('contenteditable', isEditing ? 'false' : 'true');
-    $('#toggle-edit').textContent = isEditing ? 'Edit' : 'Save';
-    if (isEditing && openItemId) {
-      const it = items.find((x) => x.id === openItemId);
-      if (it) {
-        it.content = body.textContent || '';
-        save(KEY.ITEMS, items);
-      }
+    if (body) {
+      body.textContent = material.content.substring(0, 2000);
     }
-  });
+  };
 
-  function wrapSelectionWithMark(container) {
-    const sel = window.getSelection();
-    if (!sel || sel.rangeCount === 0 || sel.isCollapsed) return false;
-    const range = sel.getRangeAt(0);
-    if (!container.contains(range.commonAncestorContainer)) return false;
-    const mark = document.createElement('mark');
-    mark.className = 'mark';
-    range.surroundContents(mark);
-    sel.removeAllRanges();
-    return true;
-  }
-
-  $('#highlight-btn')?.addEventListener('click', () => {
-    const body = $('#doc-body');
-    if (!body) return;
-    if (body.getAttribute('contenteditable') !== 'true') {
-      body.setAttribute('contenteditable', 'true');
-      $('#toggle-edit').textContent = 'Save';
-    }
-    const ok = wrapSelectionWithMark(body);
-    if (!ok) return alert('Select text in the open item to highlight.');
-  });
-
-  function persistOpenItemFromBody() {
-    const body = $('#doc-body');
-    if (!body || !openItemId) return;
-    const it = items.find((x) => x.id === openItemId);
-    if (!it) return;
-    it.content = body.textContent || '';
-    save(KEY.ITEMS, items);
-  }
-
-  $('#delete-open')?.addEventListener('click', () => {
-    if (!openItemId) return;
-    let it = items.find((x) => x.id === openItemId);
-    if (!it && cloudCache.byId?.has(openItemId)) {
-      it = rowToLocalShape(cloudCache.byId.get(openItemId));
-    }
-    if (!it) return;
-    if (!confirm(`Delete “${it.title}”?`)) return;
-    if (it._cloud) {
-      cloudDeleteLibraryItem(it.id, it.storage_path)
-        .then(() => cloudLoadAll())
-        .catch((err) => alert(`Delete failed: ${err?.message || err}`));
-    } else {
-      if (it.pdf_blob_id) {
-        deletePdfBlob(it.pdf_blob_id).catch(() => {});
-      }
-      items = items.filter((x) => x.id !== openItemId);
-      save(KEY.ITEMS, items);
-    }
-    openItemId = null;
-    renderLibrary();
-    renderTags();
-    renderStats();
-    renderUnitCards();
-  });
-
-  $('#pin-to-exampack')?.addEventListener('click', () => {
-    if (!openItemId) return;
-    const it = items.find((x) => x.id === openItemId);
-    if (!it) return;
-    it.pinned = !it.pinned;
-    save(KEY.ITEMS, items);
-    renderLibrary();
-    renderPackList();
-  });
-
-  // View mode toggle for PDF/Text
-  $('#view-as-pdf')?.addEventListener('click', async () => {
-    if (!openItemId) return;
-    let it = items.find((x) => x.id === openItemId);
-    if (!it && cloudCache.byId?.has(openItemId)) {
-      it = rowToLocalShape(cloudCache.byId.get(openItemId));
-    }
-    if (!it) return alert('This item has no PDF.');
-    
-    // Show PDF view, hide text view
-    $('#doc-body').style.display = 'none';
-    if (it._cloud && it.storage_path) {
-      await openCloudPdfInViewer(it);
-    } else if (it.pdf_blob_id) {
-      await openLocalPdfInViewer(it);
-    } else {
-      return alert('This item has no PDF.');
-    }
-    
-    // Update button states
-    $('#view-as-pdf')?.classList.add('active');
-    $('#view-as-text')?.classList.remove('active');
-  });
-
-  $('#view-as-text')?.addEventListener('click', () => {
-    if (!openItemId) return;
-    let it = items.find((x) => x.id === openItemId);
-    if (!it && cloudCache.byId?.has(openItemId)) {
-      it = rowToLocalShape(cloudCache.byId.get(openItemId));
-    }
-    if (!it) return;
-    
-    // Show text view, hide PDF view
-    pdfShow(false);
-    const body = $('#doc-body');
-    body.style.display = 'block';
-    body.innerHTML = '';
-    body.textContent = it.content || '';
-    
-    // Update button states
-    $('#view-as-text')?.classList.add('active');
-    $('#view-as-pdf')?.classList.remove('active');
-  });
-
-  // ----------------------------
-  // Notes
-  // ----------------------------
-  function unitNotes() {
-    const targetUnitId = notesUnitId || activeUnitId;
-    return notes.filter((n) => n.unitId === targetUnitId);
-  }
-
-  function renderNoteFilters() {
-    const unitSel = $('#note-unit');
-    if (!unitSel) return;
-    if (!notesUnitId) notesUnitId = activeUnitId;
-    unitSel.innerHTML = units
-      .map((u) => `<option value="${escapeHtml(u.id)}">${escapeHtml(u.name)}</option>`)
-      .join('');
-    unitSel.value = notesUnitId;
-  }
-
-  function openNote(id) {
-    const note = notes.find((n) => n.id === id);
-    if (!note) return;
-    openNoteId = note.id;
-    const titleEl = $('#open-note-title');
-    const bodyEl = $('#open-note-body');
-    if (titleEl) titleEl.value = note.title || '';
-    if (bodyEl) bodyEl.innerHTML = note.content || '';
-    const meta = $('#note-meta');
-    if (meta) {
-      meta.textContent = `Updated ${new Date(note.updated || note.created).toLocaleString()}`;
-    }
-  }
-
-  function renderNotesList() {
-    const list = $('#notes-list');
-    if (!list) return;
-    const data = unitNotes()
-      .slice()
-      .sort((a, b) => (b.updated || b.created) - (a.updated || a.created));
-    list.innerHTML = '';
-    if (openNoteId && !notes.find((n) => n.id === openNoteId)) {
-      openNoteId = null;
-      const titleEl = $('#open-note-title');
-      const bodyEl = $('#open-note-body');
-      if (titleEl) titleEl.value = '';
-      if (bodyEl) bodyEl.innerHTML = '';
-      const meta = $('#note-meta');
-      if (meta) meta.textContent = '—';
-    }
-    if (!data.length) {
-      list.innerHTML = '<div class="muted small">No notes yet. Create one above.</div>';
-      return;
-    }
-    data.forEach((note) => {
-      const item = document.createElement('div');
-      item.className = 'item';
-      item.dataset.id = note.id;
-      const preview = (note.content || '').slice(0, 80);
-      const suffix = (note.content || '').length > 80 ? '…' : '';
-      item.innerHTML = `
-        <div class="row between">
-          <strong>${escapeHtml(note.title || 'Untitled')}</strong>
-          <span class="muted small">${new Date(note.updated || note.created).toLocaleDateString()}</span>
-        </div>
-        <div class="muted small">${escapeHtml(preview)}${suffix}</div>
-      `;
-      item.addEventListener('click', () => openNote(note.id));
-      list.appendChild(item);
-    });
-    if (!openNoteId && data[0]) openNote(data[0].id);
-  }
-
-  function saveOpenNote() {
-    if (!openNoteId) return;
-    const note = notes.find((n) => n.id === openNoteId);
-    if (!note) return;
-    const titleEl = $('#open-note-title');
-    const bodyEl = $('#open-note-body');
-    note.title = (titleEl?.value || '').trim() || 'Untitled';
-    note.content = bodyEl?.innerHTML || '';
-    note.notebook = note.notebook || 'General';
-    note.section = note.section || 'General';
-    note.updated = now();
-    save(KEY.NOTES, notes);
-    renderNoteFilters();
-    renderNotesList();
-    const meta = $('#note-meta');
-    if (meta) meta.textContent = `Updated ${new Date(note.updated).toLocaleString()}`;
-  }
-
-  $('#add-note')?.addEventListener('click', () => {
-    const titleInput = $('#note-title');
-    const title = (titleInput?.value || '').trim() || 'Untitled';
-    const note = {
-      id: uid(),
-      unitId: notesUnitId || activeUnitId,
-      title,
-      content: '',
-      notebook: 'General',
-      section: 'General',
-      created: now(),
-      updated: now()
-    };
-    notes.unshift(note);
-    save(KEY.NOTES, notes);
-    if (titleInput) titleInput.value = '';
-    renderNoteFilters();
-    renderNotesList();
-    openNote(note.id);
-  });
-
-  $('#note-unit')?.addEventListener('change', (e) => {
-    notesUnitId = e.target.value;
-    renderNotesList();
-  });
-
-  $('#save-note')?.addEventListener('click', saveOpenNote);
-
-  $('#delete-note')?.addEventListener('click', () => {
-    if (!openNoteId) return;
-    const note = notes.find((n) => n.id === openNoteId);
-    if (!note) return;
-    if (!confirm(`Delete note "${note.title || 'Untitled'}"?`)) return;
-    notes = notes.filter((n) => n.id !== openNoteId);
-    save(KEY.NOTES, notes);
-    openNoteId = null;
-    renderNotesList();
-    const titleEl = $('#open-note-title');
-    const bodyEl = $('#open-note-body');
-    if (titleEl) titleEl.value = '';
-    if (bodyEl) bodyEl.innerHTML = '';
-    const meta = $('#note-meta');
-    if (meta) meta.textContent = '—';
-  });
-
-  $('#open-note-title')?.addEventListener('input', saveOpenNote);
-  $('#open-note-body')?.addEventListener('input', saveOpenNote);
-
-  // Notes rich editor toolbar
-  $('#notes-bold')?.addEventListener('click', () => {
-    document.execCommand('bold');
-    $('#open-note-body')?.focus();
-  });
-  $('#notes-italic')?.addEventListener('click', () => {
-    document.execCommand('italic');
-    $('#open-note-body')?.focus();
-  });
-  $('#notes-bullets')?.addEventListener('click', () => {
-    document.execCommand('insertUnorderedList');
-    $('#open-note-body')?.focus();
-  });
-
-  // ----------------------------
-  // Summariser + concept extractor
-  // ----------------------------
-  function summarize(text, topN = 4) {
-    const sents = (text || '')
-      .split(/[\.!?]\s+/)
-      .map((s) => s.trim())
-      .filter((s) => s.length > 20);
-
-    if (sents.length <= topN) return sents;
-
-    const stop = new Set([
-      'the', 'and', 'of', 'to', 'a', 'in', 'is', 'for', 'that', 'on', 'with', 'as', 'by',
-      'an', 'are', 'this', 'it', 'be', 'or', 'from', 'at', 'was', 'were', 'can', 'may',
-      'must', 'should', 'not', 'but', 'if', 'into', 'their', 'there', 'which', 'also'
-    ]);
-    const freq = {};
-    for (const s of sents) {
-      for (const w0 of s.split(/\W+/)) {
-        const w = w0.toLowerCase();
-        if (!w || stop.has(w)) continue;
-        freq[w] = (freq[w] || 0) + 1;
-      }
-    }
-    const scored = sents.map((s) => {
-      const sc = s.split(/\W+/).reduce((acc, w0) => {
-        const w = w0.toLowerCase();
-        return acc + (freq[w] || 0);
-      }, 0);
-      return { s, sc };
-    });
-    scored.sort((a, b) => b.sc - a.sc);
-    return scored.slice(0, topN).map((x) => x.s);
-  }
-
-  function extractConcepts(text, max = 12) {
-    const raw = (text || '').replace(/\s+/g, ' ').trim();
-    if (!raw) return [];
-    const words = raw.split(/\W+/).filter(Boolean);
-    const stop = new Set(['the','and','of','to','a','in','is','for','that','on','with','as','by','an','are','this','it','be','or','from','at']);
-    const freq = {};
-    for (const w0 of words) {
-      const w = w0.toLowerCase();
-      if (w.length < 5 || stop.has(w)) continue;
-      freq[w] = (freq[w] || 0) + 1;
-    }
-    const ranked = Object.entries(freq)
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, max * 2)
-      .map(([w]) => w);
-
-    const caps = (text || '').match(/\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,3}\b/g) || [];
-    const capRank = [...new Set(caps)]
-      .filter((p) => p.length >= 8 && p.split(' ').length <= 4)
-      .slice(0, max);
-
-    const mix = [...new Set([...capRank, ...ranked])].slice(0, max);
-    return mix;
-  }
-
-  $('#summarize-btn')?.addEventListener('click', () => {
-    if (!openItemId) return alert('Open an item first.');
-    persistOpenItemFromBody();
-    const it = items.find((x) => x.id === openItemId);
-    const sum = summarize(it?.content || '', 4);
-    $('#summary').innerHTML = sum.length
-      ? `<ol class="small">${sum.map((s) => `<li>${escapeHtml(s)}</li>`).join('')}</ol>`
-      : '<span class="muted">—</span>';
-  });
-
-  let lastConcepts = [];
-  $('#extract-concepts')?.addEventListener('click', () => {
-    if (!openItemId) return alert('Open an item first.');
-    persistOpenItemFromBody();
-    const it = items.find((x) => x.id === openItemId);
-    lastConcepts = extractConcepts(it?.content || '', 14);
-    const c = $('#concepts');
-    c.innerHTML = '';
-    lastConcepts.forEach((t) => {
-      const el = document.createElement('div');
-      el.className = 'chip';
-      el.textContent = t;
-      c.appendChild(el);
-    });
-    if (!lastConcepts.length) c.innerHTML = '<span class="muted small">No concepts found.</span>';
-  });
-
-  // ----------------------------
-  // Flashcards: Leitner spaced repetition
-  // ----------------------------
-  const BOX_DAYS = { 1: 0, 2: 1, 3: 3, 4: 7, 5: 14 };
-
-  function unitDecks() {
-    return decks.filter((d) => d.unitId === activeUnitId);
-  }
-
-  function saveDecks() {
-    save(KEY.DECKS, decks);
-  }
-
-  function ensureDefaultDeck() {
-    if (!unitDecks().length) {
-      const d = {
-        id: uid(),
-        unitId: activeUnitId,
-        name: 'General',
-        created: now(),
-        cards: []
-      };
-      decks.push(d);
-      saveDecks();
-    }
-  }
+  // ============================================
+  // FLASHCARD MANAGEMENT
+  // ============================================
 
   function renderDeckSelect() {
     const sel = $('#deck-select');
     if (!sel) return;
-    sel.innerHTML = '';
-    const ds = unitDecks();
-    ds.forEach((dk) => {
-      const opt = document.createElement('option');
-      opt.value = dk.id;
-      opt.textContent = `${dk.name} (${dk.cards.length})`;
-      sel.appendChild(opt);
-    });
-    if (!sel.value && ds[0]) sel.value = ds[0].id;
+
+    const unitDecks = decks.filter(d => d.unitId === activeUnitId);
+    sel.innerHTML = unitDecks.map(d => `<option value="${d.id}">${d.name}</option>`).join('');
   }
-
-  $('#new-empty-deck')?.addEventListener('click', () => {
-    const name = prompt('Deck name', 'New deck');
-    if (!name) return;
-    decks.push({ id: uid(), unitId: activeUnitId, name, created: now(), cards: [] });
-    saveDecks();
-    renderDeckSelect();
-    renderDueList();
-    renderStats();
-  });
-
-  $('#delete-deck')?.addEventListener('click', () => {
-    const sel = $('#deck-select');
-    if (!sel?.value) return;
-    const dk = decks.find((d) => d.id === sel.value);
-    if (!dk) return;
-    if (!confirm(`Delete deck “${dk.name}”?`)) return;
-    decks = decks.filter((d) => d.id !== dk.id);
-    saveDecks();
-    ensureDefaultDeck();
-    renderDeckSelect();
-    loadDeck($('#deck-select').value);
-    renderDueList();
-    renderStats();
-  });
-
-  function addCardToDeck(deckId, q, a) {
-    const dk = decks.find((d) => d.id === deckId);
-    if (!dk) return;
-    dk.cards.push({
-      id: uid(),
-      q: q || '',
-      a: a || '',
-      box: 1,
-      due: toISODate(new Date()),
-      stats: { seen: 0, correct: 0 }
-    });
-    saveDecks();
-  }
-
-  $('#add-card')?.addEventListener('click', () => {
-    const q = ($('#card-q')?.value || '').trim();
-    const a = ($('#card-a')?.value || '').trim();
-    if (!q || !a) return alert('Add both front and back.');
-    const deckId = $('#deck-select')?.value;
-    if (!deckId) return;
-    addCardToDeck(deckId, q, a);
-    $('#card-q').value = '';
-    $('#card-a').value = '';
-    renderDeckSelect();
-    renderDueList();
-    renderStats();
-    loadDeck(deckId);
-  });
-
-  function makeClozeCards(text, limit = 30) {
-    const sents = (text || '')
-      .split(/[\.!?]\s+/)
-      .map((s) => s.trim())
-      .filter((s) => s.length > 35)
-      .slice(0, 200);
-
-    const concepts = extractConcepts(text, 40).map((t) => t.split(' ')[0]);
-    return sents.slice(0, limit).map((s) => {
-      const words = s.split(/\s+/);
-      let pivot = words.reduce((best, w) => (w.length > best.length ? w : best), '');
-      for (const c of concepts) {
-        const re = new RegExp(`\\b${c}\\b`, 'i');
-        if (re.test(s) && c.length >= 5) { pivot = c; break; }
-      }
-      const q = s.replace(new RegExp(`\\b${pivot}\\b`, 'i'), '_____');
-      return { q, a: s };
-    });
-  }
-
-  $('#create-deck-from-open')?.addEventListener('click', () => {
-    if (!openItemId) return alert('Open a library item first.');
-    persistOpenItemFromBody();
-    const it = items.find((x) => x.id === openItemId);
-    if (!it) return;
-    const name = prompt('Deck name', `${it.title} — deck`) || `${it.title} — deck`;
-    const cards = makeClozeCards(it.content, 28);
-
-    const deckId = uid();
-    decks.push({
-      id: deckId,
-      unitId: activeUnitId,
-      name,
-      created: now(),
-      cards: cards.map((c) => ({
-        id: uid(),
-        q: c.q,
-        a: c.a,
-        box: 1,
-        due: toISODate(new Date()),
-        stats: { seen: 0, correct: 0 }
-      }))
-    });
-
-    saveDecks();
-    renderDeckSelect();
-    loadDeck(deckId);
-    show('flashcards');
-    renderDueList();
-    renderStats();
-    alert('Deck created.');
-  });
-
-  $('#qa-generate-deck')?.addEventListener('click', () => {
-    show('library');
-    setTimeout(() => $('#create-deck-from-open')?.click(), 50);
-  });
 
   let currentDeckId = null;
-  let currentCardIndex = 0;
-  let reviewMode = 'all';
+  let currentCardIdx = 0;
 
-  function currentDeck() {
-    return decks.find((d) => d.id === currentDeckId);
-  }
+  $('#deck-select')?.addEventListener('change', (e) => {
+    currentDeckId = e.target.value;
+    currentCardIdx = 0;
+    showCard();
+  });
 
-  function dueCards(deck) {
-    const today = toISODate(new Date());
-    return (deck?.cards || []).filter((c) => !c.due || c.due <= today);
-  }
-
-  function renderDeckStats() {
-    const deck = currentDeck();
-    const el = $('#deck-stats');
-    if (!el || !deck) return;
-    const due = dueCards(deck).length;
-    const total = deck.cards.length;
-    const boxes = [1,2,3,4,5].map((b) => deck.cards.filter((c) => c.box === b).length);
-    el.innerHTML = `Total: <strong>${total}</strong> • Due today: <strong>${due}</strong><br>
-      Boxes: ${boxes.map((n, i) => `<span class="badge">B${i+1}: ${n}</span>`).join(' ')}`;
-  }
-
-  function cardPool(deck) {
-    if (!deck) return [];
-    return reviewMode === 'due' ? dueCards(deck) : deck.cards;
+  function getDeckCards(deckId) {
+    return cards.filter(c => c.deckId === deckId);
   }
 
   function showCard() {
-    const deck = currentDeck();
-    const pool = cardPool(deck);
-    if (!deck || !pool.length) {
-      $('#card-info').textContent = 'No cards (or none due).';
-      $('#question').textContent = '—';
-      $('#answer').style.display = 'none';
-      $('#answer').textContent = '';
+    const deckCards = getDeckCards(currentDeckId);
+    if (!deckCards.length) {
+      $('#question').textContent = 'No cards in this deck';
       return;
     }
-    const idx = clamp(currentCardIndex, 0, pool.length - 1);
-    currentCardIndex = idx;
-    const card = pool[idx];
 
-    $('#card-info').textContent = `${deck.name} • ${reviewMode === 'due' ? 'Due' : 'All'} • Card ${idx + 1}/${pool.length} • Box ${card.box}`;
+    const card = deckCards[currentCardIdx];
+    $('#card-info').textContent = `Card ${currentCardIdx + 1} of ${deckCards.length}`;
     $('#question').textContent = card.q;
     $('#answer').textContent = card.a;
     $('#answer').style.display = 'none';
-    renderDeckStats();
+    $('#show-answer').style.display = 'inline-block';
   }
-
-  function loadDeck(deckId) {
-    currentDeckId = deckId;
-    currentCardIndex = 0;
-    reviewMode = 'all';
-    showCard();
-  }
-
-  $('#deck-select')?.addEventListener('change', (e) => {
-    loadDeck(e.target.value);
-    renderDueList();
-  });
-
-  $('#study-due')?.addEventListener('click', () => {
-    reviewMode = 'due';
-    currentCardIndex = 0;
-    showCard();
-  });
 
   $('#show-answer')?.addEventListener('click', () => {
     $('#answer').style.display = 'block';
+    $('#show-answer').style.display = 'none';
   });
 
   $('#next-card')?.addEventListener('click', () => {
-    const pool = cardPool(currentDeck());
-    if (!pool.length) return;
-    currentCardIndex = (currentCardIndex + 1) % pool.length;
+    const deckCards = getDeckCards(currentDeckId);
+    currentCardIdx = (currentCardIdx + 1) % deckCards.length;
     showCard();
   });
 
-  $('#prev-card')?.addEventListener('click', () => {
-    const pool = cardPool(currentDeck());
-    if (!pool.length) return;
-    currentCardIndex = (currentCardIndex - 1 + pool.length) % pool.length;
-    showCard();
-  });
-
-  function reschedule(card, correct) {
-    const box = correct ? clamp((card.box || 1) + 1, 1, 5) : 1;
-    card.box = box;
-    const days = BOX_DAYS[box] ?? 0;
-    const due = new Date();
-    due.setDate(due.getDate() + days);
-    card.due = toISODate(due);
-  }
-
-  $('#mark-known')?.addEventListener('click', () => {
-    const deck = currentDeck();
-    const pool = cardPool(deck);
-    if (!deck || !pool.length) return;
-    const card = pool[currentCardIndex];
-
-    card.stats.seen += 1;
-    card.stats.correct += 1;
-    reschedule(card, true);
-    saveDecks();
-
-    bumpStreak();
-    renderDueList();
-    renderStats();
+  $('#mark-correct')?.addEventListener('click', () => {
+    const deckCards = getDeckCards(currentDeckId);
+    const card = deckCards[currentCardIdx];
+    card.stats.correct++;
+    card.stats.seen++;
+    save(KEY.FLASHCARDS, cards);
     $('#next-card').click();
   });
 
-  $('#mark-again')?.addEventListener('click', () => {
-    const deck = currentDeck();
-    const pool = cardPool(deck);
-    if (!deck || !pool.length) return;
-    const card = pool[currentCardIndex];
-
-    card.stats.seen += 1;
-    reschedule(card, false);
-    saveDecks();
-
-    bumpStreak();
-    renderDueList();
-    renderStats();
+  $('#mark-wrong')?.addEventListener('click', () => {
+    const deckCards = getDeckCards(currentDeckId);
+    const card = deckCards[currentCardIdx];
+    card.stats.seen++;
+    save(KEY.FLASHCARDS, cards);
     $('#next-card').click();
   });
 
-  function renderDueList() {
-    const el = $('#due-list');
-    if (!el) return;
-    const ds = unitDecks();
-    const today = toISODate(new Date());
-    const due = [];
-    ds.forEach((dk) => {
-      (dk.cards || []).forEach((c) => {
-        if (!c.due || c.due <= today) due.push({ deck: dk.name, q: c.q, box: c.box });
+  // ============================================
+  // QUIZ BUILDER
+  // ============================================
+
+  function generateQuizQuestions(material, count = 10) {
+    const sentences = material.content.split(/[.!?]+/).filter(s => s.trim().length > 30);
+    const questions = [];
+
+    for (let i = 0; i < Math.min(count, sentences.length); i++) {
+      const sentence = sentences[i].trim();
+      
+      questions.push({
+        id: uid(),
+        type: i % 3 === 0 ? 'mcq' : i % 3 === 1 ? 'short' : 'essay',
+        question: `Q${i + 1}: ${sentence.substring(0, 150)}...?`,
+        content: sentence,
+        userAnswer: '',
+        correct: false
       });
-    });
-    el.innerHTML = '';
-    if (!due.length) {
-      el.innerHTML = '<div class="muted small">No cards due today.</div>';
-      return;
     }
-    due.slice(0, 14).forEach((d) => {
-      const div = document.createElement('div');
-      div.className = 'item';
-      div.innerHTML = `<div class="row between"><strong>${escapeHtml(d.deck)}</strong><span class="badge">Box ${d.box}</span></div>
-                       <div class="muted small" style="margin-top:6px">${escapeHtml(d.q).slice(0, 140)}${d.q.length > 140 ? '…' : ''}</div>`;
-      el.appendChild(div);
-    });
+
+    return questions;
   }
 
-  // ----------------------------
-  // Learn: skills (tags) + mastery
-  // ----------------------------
-  function unitMastery() {
-    mastery[activeUnitId] = mastery[activeUnitId] || {};
-    return mastery[activeUnitId];
-  }
+  let currentQuizQuestions = [];
+  let currentQuizIdx = 0;
 
-  function renderTags() {
-    const tagSel = $('#filter-tag');
-    const testTagSel = $('#test-tag');
-    const practiceSel = $('#practice-skill');
-    if (!tagSel || !testTagSel || !practiceSel) return;
+  $('#start-quiz')?.addEventListener('click', async () => {
+    const sourceId = $('#quiz-source').value;
+    const count = parseInt($('#quiz-count').value) || 10;
 
-    const tags = new Set();
-    getCurrentLibraryItems().forEach((it) => (it.tags || []).forEach((t) => tags.add(t)));
-    const list = Array.from(tags).sort((a, b) => a.localeCompare(b));
+    const material = materials.find(m => m.id === sourceId);
+    if (!material) return alert('Select a material');
 
-    tagSel.innerHTML = '<option value="">All topics</option>' + list.map((t) => `<option value="${escapeHtml(t)}">${escapeHtml(t)}</option>`).join('');
-    testTagSel.innerHTML = '<option value="">Choose topic</option>' + list.map((t) => `<option value="${escapeHtml(t)}">${escapeHtml(t)}</option>`).join('');
-    practiceSel.innerHTML = '<option value="">Choose a skill/topic</option>' + list.map((t) => `<option value="${escapeHtml(t)}">${escapeHtml(t)}</option>`).join('');
+    currentQuizQuestions = generateQuizQuestions(material, count);
+    currentQuizIdx = 0;
+    renderQuizQuestion();
+  });
 
-    renderSkills();
-  }
-
-  function renderSkills() {
-    const container = $('#skills');
-    if (!container) return;
-    const m = unitMastery();
-    const tags = new Set();
-    getCurrentLibraryItems().forEach((it) => (it.tags || []).forEach((t) => tags.add(t)));
-    const list = Array.from(tags).sort((a, b) => a.localeCompare(b));
-    container.innerHTML = '';
-    if (!list.length) {
-      container.innerHTML = '<div class="muted small">No skills yet. Add tags to library items (e.g., Offer, Consideration, Mens rea).</div>';
+  function renderQuizQuestion() {
+    if (currentQuizIdx >= currentQuizQuestions.length) {
+      $('#quiz-session').innerHTML = '<div class="muted">✅ Quiz completed! Review your answers.</div>';
       return;
     }
 
-    list.forEach((tag) => {
-      const val = clamp(m[tag] ?? 0, 0, 100);
-      const div = document.createElement('div');
-      div.className = 'skill';
-      div.innerHTML = `
-        <div class="row between">
-          <strong>${escapeHtml(tag)}</strong>
-          <span class="badge">${val}%</span>
-        </div>
-        <div class="bar"><div style="width:${val}%"></div></div>
-        <div class="muted small" style="margin-top:6px">${val < 40 ? 'Needs practice' : val < 75 ? 'Developing' : 'Strong'}</div>
-      `;
-      container.appendChild(div);
-    });
-  }
-
-  function adjustMastery(tags, delta) {
-    const m = unitMastery();
-    (tags || []).forEach((t) => {
-      const cur = clamp(m[t] ?? 0, 0, 100);
-      m[t] = clamp(cur + delta, 0, 100);
-    });
-    save(KEY.MASTERY, mastery);
-    renderSkills();
-  }
-
-  // Learn page controls
-  $('#refresh-skills')?.addEventListener('click', () => {
-    renderSkills();
-    toast('Skills refreshed');
-  });
-
-  $('#clear-learn-session')?.addEventListener('click', () => {
-    const session = $('#learn-session');
-    if (session) {
-      session.innerHTML = '<div class="muted small">Select a skill and start a practice quiz to begin.</div>';
-    }
-  });
-
-  // ----------------------------
-  // Tests: generate MCQ / short / cloze
-  // ----------------------------
-  // ✅ Updated to use Supabase fields safely (content_text)
-  function buildQuestionBank(sourceItems) {
-    const bank = [];
-
-    const getText = (it) => (it.content_text ?? it.content ?? "").toString();
-    const getTags = (it) => Array.isArray(it.tags) ? it.tags : [];
-
-    sourceItems.forEach((it) => {
-      const text = getText(it);
-      if (!text.trim()) return;
-
-      const concepts = extractConcepts(text, 20);
-      const sents = text.split(/[\.!?]\s+/).map((s) => s.trim()).filter((s) => s.length > 40);
-
-      // Cloze from sentences
-      sents.slice(0, 14).forEach((s) => {
-        const pick =
-          concepts.find((c) => new RegExp(`\\b${c.split(' ')[0]}\\b`, 'i').test(s)) ||
-          concepts[0];
-        if (!pick) return;
-
-        const term = pick.split(' ')[0];
-        const q = s.replace(new RegExp(`\\b${term}\\b`, 'i'), '_____');
-        bank.push({ type: 'cloze', q, a: term, tags: getTags(it), itemId: it.id });
-      });
-
-      // Short answer prompts from concepts
-      concepts.slice(0, 10).forEach((c) => {
-        bank.push({
-          type: 'short',
-          q: `Explain: ${c}`,
-          a: '',
-          tags: getTags(it),
-          itemId: it.id,
-          hint: `Look for mentions of “${c}” in ${it.title || 'this item'}.`
-        });
-      });
-    });
-
-    // MCQ from global concept pool across items
-    const allConcepts = [];
-    sourceItems.forEach((it) => extractConcepts((it.content_text ?? it.content ?? ""), 16).forEach((c) => allConcepts.push(c)));
-    const uniq = [...new Set(allConcepts)].filter((c) => c.length >= 4);
-
-    const distract = (ans) => {
-      const pool = uniq.filter((x) => x !== ans);
-      const picks = [];
-      while (picks.length < 3 && pool.length) {
-        const i = Math.floor(Math.random() * pool.length);
-        picks.push(pool.splice(i, 1)[0]);
-      }
-      return picks;
-    };
-
-    uniq.slice(0, 25).forEach((ans) => {
-      const opts = [...distract(ans), ans].sort(() => Math.random() - 0.5);
-      bank.push({
-        type: 'mcq',
-        q: `Which option best matches this key term?`,
-        a: ans,
-        options: opts,
-        tags: [],
-        itemId: null
-      });
-    });
-
-    return bank;
-  }
-
-  function selectQuestions(bank, count, mix) {
-    const byType = {
-      mcq: bank.filter((q) => q.type === 'mcq'),
-      short: bank.filter((q) => q.type === 'short'),
-      cloze: bank.filter((q) => q.type === 'cloze')
-    };
-    const pickN = (arr, n) => {
-      const copy = arr.slice();
-      const out = [];
-      while (out.length < n && copy.length) {
-        const i = Math.floor(Math.random() * copy.length);
-        out.push(copy.splice(i, 1)[0]);
-      }
-      return out;
-    };
-
-    let mcqN = Math.round(count * 0.45);
-    let shortN = Math.round(count * 0.25);
-    let clozeN = count - mcqN - shortN;
-
-    if (mix === 'mcq') { mcqN = Math.round(count * 0.7); shortN = Math.round(count * 0.15); clozeN = count - mcqN - shortN; }
-    if (mix === 'short') { shortN = Math.round(count * 0.6); mcqN = Math.round(count * 0.25); clozeN = count - mcqN - shortN; }
-    if (mix === 'cloze') { clozeN = Math.round(count * 0.6); mcqN = Math.round(count * 0.25); shortN = count - mcqN - clozeN; }
-
-    const out = [
-      ...pickN(byType.mcq, mcqN),
-      ...pickN(byType.short, shortN),
-      ...pickN(byType.cloze, clozeN)
-    ];
-    return out.sort(() => Math.random() - 0.5);
-  }
-
-  function renderTestBuilderUI() {
-    const src = $('#test-source')?.value;
-    const tagEl = $('#test-tag');
-    if (tagEl) tagEl.style.display = (src === 'tag') ? 'block' : 'none';
-    const mode = $('#test-mode')?.value || 'quiz';
-    const mixEl = $('#test-mix');
-    if (mixEl) mixEl.style.display = (mode === 'flashcards') ? 'none' : 'block';
-  }
-
-  $('#test-source')?.addEventListener('change', renderTestBuilderUI);
-  $('#test-mode')?.addEventListener('change', renderTestBuilderUI);
-
-  $('#open-library-to-select')?.addEventListener('click', () => {
-    show('library');
-    alert('Tip: double-click an item in the Library list to toggle “selected for test”.');
-  });
-
-  // Selection (still local-list based until your Library view is cloud-backed)
-  $('#library-list')?.addEventListener('dblclick', (e) => {
-    const itemDiv = e.target.closest('.item');
-    if (!itemDiv) return;
-    const id = itemDiv.dataset.id;
-    if (!id) return;
-    const idx = selectedForTest.indexOf(id);
-    if (idx >= 0) selectedForTest.splice(idx, 1);
-    else selectedForTest.push(id);
-    save(KEY.SELECTED_FOR_TEST, selectedForTest);
-    itemDiv.style.outline = selectedForTest.includes(id) ? '2px solid rgba(45,212,191,0.65)' : 'none';
-  });
-
-  // ✅ Replaced: Tests now fetch from Supabase rows only (unit/tag/selectedIds filtering)
-  async function startTestSession() {
-    const mode = $('#test-source')?.value || 'unit';
-    const tag = $('#test-tag')?.value || '';
-    const count = clamp(parseInt($('#test-count')?.value || '12', 10), 5, 50);
-    const mix = $('#test-mix')?.value || 'balanced';
-    const testMode = $('#test-mode')?.value || 'quiz';
-
-    // Unit name is what your Supabase rows store in `unit`
-    const unit = activeUnitName();
-
-    // Selected ids: only reliable if those ids are Supabase ids.
-    const selectedIds = (mode === 'selected') ? (selectedForTest || []) : [];
-
-    let result;
-    try {
-      result = await getTestCorpus({
-        unit,
-        tag: (mode === 'tag') ? tag : '',
-        selectedIds: (mode === 'selected') ? selectedIds : []
-      });
-    } catch (err) {
-      console.error(err);
-      return alert('Failed to load test corpus from Supabase: ' + (err?.message || err));
-    }
-
-    const sources = result.items || [];
-    if (!sources.length) {
-      return alert('No Supabase library items found for this test (or none have extracted text).');
-    }
-
-    const bank = buildQuestionBank(sources);
-    if (!bank.length) return alert('Your Supabase items need more text content to generate questions.');
-
-    const qs = selectQuestions(bank, count, mix);
-
-    let i = 0;
-    let correct = 0;
-    const touchedTags = new Set();
-
-    const container = $('#test-session');
-    if (!container) return;
-
-    if (testMode === 'flashcards') {
-      const cards = qs.map((q) => {
-        if (q.type === 'mcq') {
-          return {
-            q: `${q.q}\n${(q.options || []).map((o, idx) => `${idx + 1}. ${o}`).join('\n')}`,
-            a: q.a,
-            tags: q.tags || []
-          };
-        }
-        if (q.type === 'cloze') {
-          return { q: q.q, a: q.a, tags: q.tags || [] };
-        }
-        return { q: q.q, a: q.hint || 'Review your notes for this item.', tags: q.tags || [] };
-      });
-
-      let idx = 0;
-      let flipped = false;
-      let shuffled = false;
-
-      const renderCard = () => {
-        const card = cards[idx];
-        if (!card) return;
-        const progress = `Card ${idx + 1}/${cards.length}`;
-        container.innerHTML = `
-          <div class="flashcard">
-            <div class="muted small">${progress}</div>
-            <div class="card-face" id="test-card-face">${escapeHtml(flipped ? card.a : card.q)}</div>
-            <div class="row gap wrap" style="margin-top:10px">
-              <button id="test-flip" class="secondary">${flipped ? 'Show question' : 'Show answer'}</button>
-              <div class="spacer"></div>
-              <button id="test-wrong" class="danger ghost">Again</button>
-              <button id="test-right">Know it</button>
-            </div>
-          </div>
-          <div class="row gap wrap" style="margin-top:10px">
-            <button id="test-prev" class="ghost">Prev</button>
-            <button id="test-next" class="ghost">Next</button>
-            <div class="spacer"></div>
-            <button id="test-shuffle" class="ghost">${shuffled ? 'Unshuffle' : 'Shuffle'}</button>
-          </div>
-          <div class="divider"></div>
-          <div class="muted small">Score: ${Math.round(correct * 10) / 10}/${idx}</div>
-        `;
-
-        $('#test-flip')?.addEventListener('click', () => {
-          flipped = !flipped;
-          renderCard();
-        });
-        $('#test-prev')?.addEventListener('click', () => {
-          idx = (idx - 1 + cards.length) % cards.length;
-          flipped = false;
-          renderCard();
-        });
-        $('#test-next')?.addEventListener('click', () => {
-          idx = (idx + 1) % cards.length;
-          flipped = false;
-          renderCard();
-        });
-        $('#test-right')?.addEventListener('click', () => {
-          correct += 1;
-          (card.tags || []).forEach((t) => touchedTags.add(t));
-          idx += 1;
-          flipped = false;
-          if (idx >= cards.length) return finishFlashcards();
-          renderCard();
-        });
-        $('#test-wrong')?.addEventListener('click', () => {
-          (card.tags || []).forEach((t) => touchedTags.add(t));
-          idx += 1;
-          flipped = false;
-          if (idx >= cards.length) return finishFlashcards();
-          renderCard();
-        });
-        $('#test-shuffle')?.addEventListener('click', () => {
-          shuffled = !shuffled;
-          if (shuffled) {
-            cards.sort(() => Math.random() - 0.5);
-            idx = 0;
-          } else {
-            idx = 0;
-          }
-          flipped = false;
-          renderCard();
-        });
-      };
-
-      const finishFlashcards = () => {
-        const pct = Math.round((correct / cards.length) * 100);
-        const delta = pct >= 80 ? 8 : pct >= 60 ? 4 : 2;
-        adjustMastery(Array.from(touchedTags), delta);
-        renderStats();
-        $('#learn-session').innerHTML = `<div><strong>Last test:</strong> ${pct}%</div><div class="muted small">Skills updated for: ${escapeHtml(Array.from(touchedTags).slice(0, 8).join(', ') || '—')}</div>`;
-        container.innerHTML = `
-          <div><strong>Finished.</strong></div>
-          <div class="muted small" style="margin-top:6px">Score: ${pct}%</div>
-          <div class="divider"></div>
-          <button id="test-again" class="secondary">Restart flashcards</button>
-        `;
-        $('#test-again')?.addEventListener('click', () => startTestSession());
-      };
-
-      renderCard();
-      return;
-    }
-
-    const render = () => {
-      const q = qs[i];
-      if (!q) return;
-
-      const progress = `<div class="muted small">Question ${i + 1}/${qs.length}</div>`;
-
-      if (q.type === 'mcq') {
-        container.innerHTML = `
-          ${progress}
-          <div style="margin-top:8px"><strong>${escapeHtml(q.q)}</strong></div>
-          <div class="muted small" style="margin-top:6px">Choose the best match:</div>
-          <div class="list">
-            ${q.options.map((opt) => `<div class="item" data-opt="${escapeHtml(opt)}">${escapeHtml(opt)}</div>`).join('')}
-          </div>
-          <div class="divider"></div>
-          <div class="muted small">Score: ${Math.round(correct * 10) / 10}/${i}</div>
-        `;
-        $$('#test-session .item').forEach((el) => {
-          el.addEventListener('click', () => {
-            const chosen = el.dataset.opt;
-            const ok = chosen === q.a;
-            if (ok) correct += 1;
-            (q.tags || []).forEach((t) => touchedTags.add(t));
-            el.style.outline = ok ? '2px solid rgba(45,212,191,0.8)' : '2px solid rgba(255,77,109,0.8)';
-            setTimeout(() => {
-              i += 1;
-              if (i >= qs.length) return finish();
-              render();
-            }, 350);
-          });
-        });
-        return;
-      }
-
-      if (q.type === 'cloze') {
-        container.innerHTML = `
-          ${progress}
-          <div style="margin-top:8px"><strong>Fill the blank:</strong></div>
-          <div class="panel" style="margin-top:8px">${escapeHtml(q.q)}</div>
-          <div class="row gap wrap" style="margin-top:10px">
-            <input id="cloze-answer" placeholder="Your answer">
-            <button id="cloze-submit">Submit</button>
-            <button id="cloze-reveal" class="secondary">Reveal</button>
-          </div>
-          <div id="cloze-feedback" class="muted small" style="margin-top:10px"></div>
-          <div class="divider"></div>
-          <div class="muted small">Score: ${Math.round(correct * 10) / 10}/${i}</div>
-        `;
-        $('#cloze-submit').addEventListener('click', () => {
-          const a = ($('#cloze-answer').value || '').trim().toLowerCase();
-          const expected = (q.a || '').toLowerCase();
-          const ok = a && (expected.includes(a) || a.includes(expected));
-          if (ok) correct += 1;
-          (q.tags || []).forEach((t) => touchedTags.add(t));
-          $('#cloze-feedback').textContent = ok ? 'Correct.' : `Not quite. Expected: ${q.a}`;
-          setTimeout(() => {
-            i += 1;
-            if (i >= qs.length) return finish();
-            render();
-          }, 650);
-        });
-        $('#cloze-reveal').addEventListener('click', () => {
-          $('#cloze-feedback').textContent = `Answer: ${q.a}`;
-        });
-        return;
-      }
-
-      // short
-      container.innerHTML = `
-        ${progress}
-        <div style="margin-top:8px"><strong>${escapeHtml(q.q)}</strong></div>
-        <div class="muted small" style="margin-top:6px">${escapeHtml(q.hint || '')}</div>
-        <textarea id="short-answer" rows="5" style="margin-top:10px" placeholder="Write your answer…"></textarea>
+    const q = currentQuizQuestions[currentQuizIdx];
+    $('#quiz-session').innerHTML = `
+      <div class="quiz-q">
+        <div class="muted small">Question ${currentQuizIdx + 1} of ${currentQuizQuestions.length}</div>
+        <strong>${q.question}</strong>
+        <textarea id="quiz-answer" style="width:100%; min-height:80px; margin-top:10px" placeholder="Your answer..."></textarea>
         <div class="row gap wrap" style="margin-top:10px">
-          <button id="short-done">Mark done</button>
-          <button id="short-skip" class="secondary">Skip</button>
+          <button onclick="submitQuizAnswer()" class="secondary">Submit</button>
+          <button onclick="nextQuizQuestion()" class="ghost">Skip</button>
         </div>
-        <div class="divider"></div>
-        <div class="muted small">Score: ${Math.round(correct * 10) / 10}/${i}</div>
-      `;
-      $('#short-done').addEventListener('click', () => {
-        correct += 0.6;
-        (q.tags || []).forEach((t) => touchedTags.add(t));
-        i += 1;
-        if (i >= qs.length) return finish();
-        render();
-      });
-      $('#short-skip').addEventListener('click', () => {
-        i += 1;
-        if (i >= qs.length) return finish();
-        render();
-      });
-    };
-
-    const finish = () => {
-      bumpStreak();
-      const pct = Math.round((correct / qs.length) * 100);
-      const delta = pct >= 80 ? 8 : pct >= 60 ? 4 : 2;
-      adjustMastery(Array.from(touchedTags), delta);
-      renderStats();
-      $('#learn-session').innerHTML = `<div><strong>Last test:</strong> ${pct}%</div><div class="muted small">Skills updated for: ${escapeHtml(Array.from(touchedTags).slice(0, 8).join(', ') || '—')}</div>`;
-      container.innerHTML = `
-        <div><strong>Finished.</strong></div>
-        <div class="muted small" style="margin-top:6px">Score: ${pct}%</div>
-        <div class="divider"></div>
-        <button id="test-again" class="secondary">New test</button>
-      `;
-      $('#test-again').addEventListener('click', () => startTestSession());
-    };
-
-    render();
+      </div>
+    `;
   }
 
-  $('#start-test')?.addEventListener('click', startTestSession);
-
-  // Learn: practice quiz by tag
-  $('#start-skill-quiz')?.addEventListener('click', () => {
-    const tag = $('#practice-skill')?.value;
-    if (!tag) return alert('Pick a skill first.');
-    show('tests');
-    $('#test-source').value = 'tag';
-    renderTestBuilderUI();
-    $('#test-tag').value = tag;
-    $('#test-count').value = '10';
-    $('#test-mix').value = 'balanced';
-    startTestSession();
-  });
-
-  // Add concepts as cards into current deck
-  $('#add-concepts-as-cards')?.addEventListener('click', () => {
-    const deckId = $('#deck-select')?.value;
-    if (!deckId) return alert('Choose a deck first (Flashcards tab).');
-    if (!lastConcepts.length) return alert('Extract concepts first.');
-    lastConcepts.slice(0, 12).forEach((c) => addCardToDeck(deckId, `Define: ${c}`, `Definition / rule / authority for: ${c}`));
-    renderDeckSelect();
-    renderDueList();
-    renderStats();
-    alert('Concept cards added (fill answers as you revise).');
-  });
-
-  // ----------------------------
-  // Timetable
-  // ----------------------------
-  function renderTT() {
-    const el = $('#timetable');
-    if (!el) return;
-    const list = timetable
-      .filter((t) => t.unitId === activeUnitId)
-      .slice()
-      .sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
-    el.innerHTML = '';
-    if (!list.length) {
-      el.innerHTML = '<div class="muted small">No sessions yet.</div>';
-      return;
+  window.submitQuizAnswer = () => {
+    const answer = $('#quiz-answer').value.trim();
+    if (answer) {
+      currentQuizQuestions[currentQuizIdx].userAnswer = answer;
     }
-    list.slice(0, 18).forEach((t) => {
-      const div = document.createElement('div');
-      div.className = 'item';
-      div.innerHTML = `<div class="row between"><strong>${escapeHtml(t.activity)}</strong><span class="badge">${escapeHtml(t.date)} ${escapeHtml(t.time)}</span></div>`;
-      el.appendChild(div);
-    });
-  }
+    nextQuizQuestion();
+  };
 
-  $('#add-tt')?.addEventListener('click', () => {
-    const date = $('#tt-date')?.value;
-    const time = ($('#tt-time')?.value || '').trim();
-    const activity = ($('#tt-activity')?.value || '').trim();
-    if (!date || !time || !activity) return alert('Add date, time and activity.');
-    timetable.push({ id: uid(), unitId: activeUnitId, date, time, activity, created: now() });
-    save(KEY.TT, timetable);
-    $('#tt-time').value = '';
-    $('#tt-activity').value = '';
-    renderTT();
-    renderYearCalendar($('#tt-year-select').value || new Date().getFullYear());
-  });
+  window.nextQuizQuestion = () => {
+    currentQuizIdx++;
+    renderQuizQuestion();
+  };
 
-  function populateYearSelector() {
-    const sel = $('#tt-year-select');
-    if (!sel) return;
-    const nowY = new Date().getFullYear();
-    sel.innerHTML = '';
-    for (let y = nowY - 2; y <= nowY + 2; y++) {
-      const o = document.createElement('option');
-      o.value = y;
-      o.textContent = y;
-      sel.appendChild(o);
-    }
-    sel.value = nowY;
-  }
-
-  $('#tt-year-select')?.addEventListener('change', () => renderYearCalendar($('#tt-year-select').value));
-
-  function renderYearCalendar(year) {
-    const container = $('#year-calendar');
-    if (!container) return;
-    const y = parseInt(year || new Date().getFullYear(), 10);
-    container.innerHTML = '';
-    for (let m = 0; m < 12; m++) {
-      const monthDiv = document.createElement('div');
-      monthDiv.className = 'month';
-      const dt = new Date(y, m, 1);
-      const monthName = dt.toLocaleString(undefined, { month: 'long' });
-      const heading = document.createElement('h4');
-      heading.textContent = `${monthName} ${y}`;
-      monthDiv.appendChild(heading);
-
-      const days = document.createElement('div');
-      days.className = 'days';
-
-      const monthEvents = timetable.filter((t) => {
-        if (t.unitId !== activeUnitId) return false;
-        const d = new Date(t.date);
-        return d.getFullYear() === y && d.getMonth() === m;
-      });
-
-      const daysInMonth = new Date(y, m + 1, 0).getDate();
-      for (let d = 1; d <= daysInMonth; d++) {
-        const cell = document.createElement('div');
-        cell.className = 'daycell';
-        const dayLabel = document.createElement('div');
-        dayLabel.className = 'daylabel';
-        dayLabel.textContent = d;
-        cell.appendChild(dayLabel);
-
-        const dateStr = `${y}-${String(m + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
-        monthEvents.filter((ev) => ev.date === dateStr).slice(0, 2).forEach((ev) => {
-          const s = document.createElement('div');
-          s.className = 'day-event';
-          s.textContent = `${ev.time} ${ev.activity}`;
-          cell.appendChild(s);
-        });
-
-        days.appendChild(cell);
-      }
-      monthDiv.appendChild(days);
-      container.appendChild(monthDiv);
-    }
-  }
-
-  // ----------------------------
-  // Todos
-  // ----------------------------
-  function renderTodos() {
-    const el = $('#todo-list');
-    if (!el) return;
-    const list = todos
-      .filter((t) => t.unitId === activeUnitId)
-      .slice()
-      .sort((a, b) => (a.done === b.done ? 0 : a.done ? 1 : -1));
-    el.innerHTML = '';
-    if (!list.length) {
-      el.innerHTML = '<div class="muted small">No tasks yet.</div>';
-      return;
-    }
-    list.forEach((t) => {
-      const div = document.createElement('div');
-      div.className = 'item';
-      const due = t.due ? `<span class="badge">Due ${escapeHtml(t.due)}</span>` : '';
-      const pri = `<span class="badge">${t.priority.toUpperCase()}</span>`;
-      div.innerHTML = `
-        <div class="row between">
-          <div class="row gap">
-            <input type="checkbox" ${t.done ? 'checked' : ''} data-id="${t.id}">
-            <strong>${escapeHtml(t.text)}</strong>
-          </div>
-          <div class="row gap">${pri}${due}</div>
-        </div>
-        <div class="row gap" style="margin-top:8px">
-          <button class="ghost danger" data-del="${t.id}">Remove</button>
-        </div>
-      `;
-      el.appendChild(div);
-    });
-
-    $$('#todo-list input[type="checkbox"]').forEach((cb) => {
-      cb.addEventListener('change', () => {
-        const t = todos.find((x) => x.id === cb.dataset.id);
-        if (!t) return;
-        t.done = cb.checked;
-        save(KEY.TODOS, todos);
-        renderTodos();
-      });
-    });
-
-    $$('#todo-list button[data-del]').forEach((btn) => {
-      btn.addEventListener('click', () => {
-        const id = btn.dataset.del;
-        todos = todos.filter((x) => x.id !== id);
-        save(KEY.TODOS, todos);
-        renderTodos();
-      });
-    });
-  }
-
-  $('#add-todo')?.addEventListener('click', () => {
-    const text = ($('#todo-input')?.value || '').trim();
-    if (!text) return;
-    const priority = $('#todo-priority')?.value || 'med';
-    const due = $('#todo-due')?.value || '';
-    todos.unshift({ id: uid(), unitId: activeUnitId, text, done: false, priority, due, created: now() });
-    save(KEY.TODOS, todos);
-    $('#todo-input').value = '';
-    $('#todo-due').value = '';
-    renderTodos();
-  });
-
-  $('#gen-plan')?.addEventListener('click', () => {
-    const days = clamp(parseInt($('#plan-days')?.value || '7', 10), 1, 30);
-    const pending = todos.filter((t) => t.unitId === activeUnitId && !t.done);
-    const out = $('#plan-output');
-    out.innerHTML = '';
-    if (!pending.length) {
-      out.textContent = 'No pending tasks — schedule revision blocks or practice tests.';
-      return;
-    }
-    const lines = [];
-    for (let i = 0; i < days; i++) {
-      const t = pending[i % pending.length];
-      lines.push(`Day ${i + 1}: ${t.text}`);
-    }
-    out.innerHTML = `<ol class="small">${lines.map((l) => `<li>${escapeHtml(l)}</li>`).join('')}</ol>`;
-  });
-
-  // ----------------------------
-  // Exam pack
-  // ----------------------------
-  function renderIssues() {
-    const el = $('#issue-checklist');
-    if (!el) return;
-    const list = issues.filter((it) => it.unitId === activeUnitId);
-    el.innerHTML = '';
-    if (!list.length) {
-      el.innerHTML = '<div class="muted small">No checklist items yet.</div>';
-      return;
-    }
-    list.forEach((it) => {
-      const div = document.createElement('div');
-      div.className = 'item';
-      div.innerHTML = `
-        <div class="row between">
-          <div class="row gap">
-            <input type="checkbox" ${it.done ? 'checked' : ''} data-id="${it.id}">
-            <strong>${escapeHtml(it.text)}</strong>
-          </div>
-          <button class="ghost danger" data-del="${it.id}">Remove</button>
-        </div>
-      `;
-      el.appendChild(div);
-    });
-
-    $$('#issue-checklist input[type="checkbox"]').forEach((cb) => {
-      cb.addEventListener('change', () => {
-        const it = issues.find((x) => x.id === cb.dataset.id);
-        if (!it) return;
-        it.done = cb.checked;
-        save(KEY.ISSUES, issues);
-        renderIssues();
-      });
-    });
-
-    $$('#issue-checklist button[data-del]').forEach((btn) => {
-      btn.addEventListener('click', () => {
-        const id = btn.dataset.del;
-        issues = issues.filter((x) => x.id !== id);
-        save(KEY.ISSUES, issues);
-        renderIssues();
-      });
-    });
-  }
-
-  $('#add-issue')?.addEventListener('click', () => {
-    const t = prompt('Add an issue (e.g., Duty / Breach / Causation)');
-    if (!t) return;
-    issues.unshift({ id: uid(), unitId: activeUnitId, text: t.trim(), done: false, created: now() });
-    save(KEY.ISSUES, issues);
-    renderIssues();
-  });
-
-  $('#load-checklist-template')?.addEventListener('click', () => {
-    const templates = {
-      'Case brief (generic)': [
-        'Parties + court + date',
-        'Material facts',
-        'Issue(s)',
-        'Holding',
-        'Reasoning',
-        'Rule / principle',
-        'Ratio decidendi',
-        'Obiter (if any)',
-        'Disposition / order',
-        'Relevance to unit'
-      ],
-      'Problem question (IRAC)': [
-        'Issues',
-        'Relevant law (rules, tests)',
-        'Application to facts',
-        'Conclusion',
-        'Counter-arguments',
-        'Remedies / orders'
-      ]
-    };
-    const pick = prompt('Template name:\n- ' + Object.keys(templates).join('\n- '), 'Case brief (generic)');
-    if (!pick || !templates[pick]) return;
-    templates[pick].forEach((t) => issues.unshift({ id: uid(), unitId: activeUnitId, text: t, done: false, created: now() }));
-    save(KEY.ISSUES, issues);
-    renderIssues();
-  });
-
-  function renderPackList() {
-    const el = $('#pack-list');
-    if (!el) return;
-
-    const pinned = unitItems().filter((it) => it.pinned);
-    el.innerHTML = '';
-    if (!pinned.length) {
-      el.innerHTML = '<div class="muted small">No pinned items yet. Pin key cases/notes from the Library.</div>';
-      return;
-    }
-    pinned.forEach((it) => {
-      const div = document.createElement('div');
-      div.className = 'item';
-      div.innerHTML = `<div class="row between"><strong>${escapeHtml(it.title)}</strong><span class="badge">${escapeHtml(it.type)}</span></div>`;
-      el.appendChild(div);
-    });
-  }
-
-  $('#download-pack')?.addEventListener('click', () => {
-    const pinned = unitItems().filter((it) => it.pinned);
-    if (!pinned.length) return alert('Pin items from Library first.');
-    const content = pinned.map((it) => `--- ${it.title} (${it.type}) ---\nTags: ${(it.tags || []).join(', ')}\n\n${it.content}\n\n`).join('\n');
-    const blob = new Blob([content], { type: 'text/plain' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `exam-pack-${activeUnitName().replace(/\s+/g,'-').toLowerCase()}.txt`;
-    a.click();
-    URL.revokeObjectURL(url);
-  });
-
-  $('#clear-pack')?.addEventListener('click', () => {
-    if (!confirm('Unpin all items for this unit?')) return;
-    items.forEach((it) => { if (it.unitId === activeUnitId) it.pinned = false; });
-    save(KEY.ITEMS, items);
-    renderPackList();
-    renderLibrary();
-  });
-
-  // ----------------------------
-  // Global search
-  // ----------------------------
-  let searchTimer = null;
-  $('#global-search')?.addEventListener('input', (e) => {
-    clearTimeout(searchTimer);
-    const q = (e.target.value || '').trim();
-    searchTimer = setTimeout(() => renderSearchResults(q), 200);
-  });
-
-  function snippetOf(text, q) {
-    const t = (text || '').replace(/\s+/g, ' ');
-    const idx = t.toLowerCase().indexOf(q.toLowerCase());
-    if (idx === -1) return t.slice(0, 160);
-    const start = Math.max(0, idx - 50);
-    return (start > 0 ? '…' : '') + t.slice(start, start + 220) + (t.length > start + 220 ? '…' : '');
-  }
-
-  function renderSearchResults(query) {
-    const container = $('#search-results');
-    if (!container) return;
-    container.style.display = query ? 'block' : 'none';
-    container.innerHTML = '';
-    if (!query) return;
-
-    const q = query.toLowerCase();
-    const textFromHtml = (html) => (html || '').replace(/<[^>]*>/g, ' ');
-
-    const libraryResults = getCurrentLibraryItems()
-      .filter((it) =>
-        (it.title || '').toLowerCase().includes(q) ||
-        (it.content || '').toLowerCase().includes(q) ||
-        (it.tags || []).some((t) => t.toLowerCase().includes(q))
-      )
-      .slice(0, 20)
-      .map((it) => ({ type: 'library', item: it }));
-
-    const noteResults = notes
-      .filter((n) =>
-        (n.title || '').toLowerCase().includes(q) ||
-        textFromHtml(n.content || '').toLowerCase().includes(q)
-      )
-      .slice(0, 10)
-      .map((n) => ({ type: 'note', item: n }));
-
-    const todoResults = todos
-      .filter((t) => (t.text || '').toLowerCase().includes(q))
-      .slice(0, 10)
-      .map((t) => ({ type: 'todo', item: t }));
-
-    const results = [...libraryResults, ...noteResults, ...todoResults].slice(0, 40);
-
-    if (!results.length) {
-      container.innerHTML = '<div class="search-item muted">No results.</div>';
-      return;
-    }
-
-    results.forEach((res) => {
-      const it = res.item;
-      const label = res.type === 'library' ? 'Library' : res.type === 'note' ? 'Note' : 'Task';
-      const unitName = units.find(u => u.id === it.unitId)?.name || activeUnitName();
-      const div = document.createElement('div');
-      div.className = 'search-item';
-      if (res.type === 'library') {
-        div.innerHTML = `
-          <strong>${escapeHtml(it.title)}</strong>
-          <div class="muted small">${escapeHtml(it.type.toUpperCase())} • ${escapeHtml(unitName)} • ${label}</div>
-          <div class="snippet">${escapeHtml(snippetOf(it.content, query))}</div>
-        `;
-      } else if (res.type === 'note') {
-        div.innerHTML = `
-          <strong>${escapeHtml(it.title || 'Untitled')}</strong>
-          <div class="muted small">${escapeHtml(unitName)} • ${label}</div>
-          <div class="snippet">${escapeHtml(snippetOf(textFromHtml(it.content || ''), query))}</div>
-        `;
-      } else {
-        div.innerHTML = `
-          <strong>${escapeHtml(it.text || 'Task')}</strong>
-          <div class="muted small">${escapeHtml(unitName)} • ${label}</div>
-          <div class="snippet">${escapeHtml(snippetOf(it.text || '', query))}</div>
-        `;
-      }
-      div.addEventListener('click', () => {
-        $('#global-search').value = '';
-        container.style.display = 'none';
-        if (res.type === 'library') {
-          show('library');
-          activeUnitId = it.unitId || activeUnitId;
-          renderUnitSelect();
-          openLibraryItem(it.id);
-          renderLibrary();
-          renderTags();
-          renderPackList();
-          renderIssues();
-          renderStats();
-          renderUnitCards();
-        } else if (res.type === 'note') {
-          show('notes');
-          activeUnitId = it.unitId || activeUnitId;
-          renderUnitSelect();
-          renderNoteFilters();
-          renderNotesList();
-          openNote(it.id);
-        } else {
-          show('tasks');
-          activeUnitId = it.unitId || activeUnitId;
-          renderUnitSelect();
-          renderTodos();
-        }
-      });
-      container.appendChild(div);
-    });
-  }
-
-  // ----------------------------
-  // Stats + streak
-  // ----------------------------
-  function bumpStreak() {
-    const today = toISODate(new Date());
-    if (!streak.lastDayISO) {
-      streak.lastDayISO = today;
-      streak.count = 1;
-    } else if (streak.lastDayISO === today) {
-      // no-op
-    } else {
-      const last = new Date(streak.lastDayISO);
-      const diffDays = Math.round((new Date(today) - last) / (1000 * 60 * 60 * 24));
-      if (diffDays === 1) streak.count += 1;
-      else streak.count = 1;
-      streak.lastDayISO = today;
-    }
-    save(KEY.STREAK, streak);
-  }
+  // ============================================
+  // STATS & UI
+  // ============================================
 
   function renderStats() {
-    const unitCount = getCurrentLibraryItems().length;
-    $('#stat-items').textContent = unitCount;
+    const unitMats = unitMaterials();
+    $('#stat-items').textContent = unitMats.length;
+    
+    const unitDecks = decks.filter(d => d.unitId === activeUnitId);
+    const unitCards = cards.filter(c => unitDecks.some(d => d.id === c.deckId));
+    $('#stat-flashcards').textContent = unitCards.length;
 
-    const today = toISODate(new Date());
-    let due = 0;
-    unitDecks().forEach((dk) => (dk.cards || []).forEach((c) => { if (!c.due || c.due <= today) due += 1; }));
-    $('#stat-due').textContent = due;
-
-    $('#stat-streak').textContent = streak.count || 0;
+    // Dashboard stats
+    $('#total-materials').textContent = materials.length;
+    $('#total-flashcards').textContent = cards.length;
+    $('#total-quizzes').textContent = load('quiz_count', 0);
   }
 
-  // ----------------------------
-  // Unit dashboard cards
-  // ----------------------------
-  function activeUnitName() {
-    return units.find((u) => u.id === activeUnitId)?.name || 'Unit';
+  // ============================================
+  // ROUTER
+  // ============================================
+
+  const views = {
+    dashboard: $('#view-dashboard'),
+    library: $('#view-library'),
+    flashcards: $('#view-flashcards'),
+    quiz: $('#view-quiz'),
+    settings: $('#view-settings')
+  };
+
+  function show(viewName) {
+    Object.values(views).forEach(v => v && (v.style.display = 'none'));
+    views[viewName] && (views[viewName].style.display = '');
   }
 
-  function renderUnitCards() {
-    const el = $('#unit-cards');
-    if (!el) return;
+  async function go(viewName) {
+    show(viewName);
+    
+    if (viewName === 'library') {
+      renderMaterials();
+    } else if (viewName === 'flashcards') {
+      renderDeckSelect();
+      if (currentDeckId) showCard();
+    } else if (viewName === 'quiz') {
+      const unitMats = unitMaterials();
+      const sel = $('#quiz-source');
+      if (sel) {
+        sel.innerHTML = unitMats.map(m => `<option value="${m.id}">${m.title}</option>`).join('');
+      }
+    }
+  }
 
-    const cards = units.map((u) => {
-      const uItems = items.filter((it) => it.unitId === u.id);
-      const uDecks = decks.filter((d) => d.unitId === u.id);
-      const today = toISODate(new Date());
-      let uDue = 0;
-      uDecks.forEach((dk) => (dk.cards || []).forEach((c) => { if (!c.due || c.due <= today) uDue += 1; }));
-
-      const m = mastery[u.id] || {};
-      const skills = Object.keys(m).length;
-      const avg = skills ? Math.round(Object.values(m).reduce((a, b) => a + b, 0) / skills) : 0;
-
-      return { unit: u, count: uItems.length, due: uDue, skills, avg };
+  $$('.nav-btn').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      $$('.nav-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      go(btn.dataset.view);
     });
-
-    el.innerHTML = '';
-    cards.forEach((c) => {
-      const div = document.createElement('div');
-      div.className = 'item';
-      div.innerHTML = `
-        <div class="row between">
-          <strong>${escapeHtml(c.unit.name)}</strong>
-          <span class="badge">${c.count} items</span>
-        </div>
-        <div class="row gap wrap" style="margin-top:8px">
-          <span class="badge">${c.due} due</span>
-          <span class="badge">${c.skills} skills</span>
-          <span class="badge">avg ${c.avg}%</span>
-        </div>
-      `;
-      div.addEventListener('click', () => {
-        activeUnitId = c.unit.id;
-        renderUnitSelect();
-        refreshAll();
-        show('library');
-      });
-      el.appendChild(div);
-    });
-  }
-
-  // Quick actions
-  $('#qa-upload')?.addEventListener('click', () => {
-    show('library');
-    $('#file-input')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
   });
 
-  $('#qa-generate-test')?.addEventListener('click', () => {
-    show('tests');
+  // ============================================
+  // THEME TOGGLE
+  // ============================================
+
+  $('#theme-toggle')?.addEventListener('click', () => {
+    document.body.classList.toggle('theme-light');
+    localStorage.setItem('theme', document.body.className);
   });
 
-  // ----------------------------
-  // Settings: import/export/wipe
-  // ----------------------------
+  // ============================================
+  // UPLOAD ZONE DRAG & DROP
+  // ============================================
+
+  const uploadZone = $('#upload-zone');
+  if (uploadZone) {
+    uploadZone.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      uploadZone.style.opacity = '0.7';
+    });
+    uploadZone.addEventListener('dragleave', () => {
+      uploadZone.style.opacity = '1';
+    });
+    uploadZone.addEventListener('drop', (e) => {
+      e.preventDefault();
+      uploadZone.style.opacity = '1';
+      const files = e.dataTransfer.files;
+      $('#file-input').files = files;
+      const event = new Event('change', { bubbles: true });
+      $('#file-input').dispatchEvent(event);
+    });
+  }
+
+  $('#browse-btn')?.addEventListener('click', () => {
+    $('#file-input').click();
+  });
+
+  $('#add-material')?.addEventListener('click', () => {
+    $('#file-input').click();
+  });
+
+  // ============================================
+  // EXPORT/IMPORT
+  // ============================================
+
   $('#export-data')?.addEventListener('click', () => {
-    const payload = {
-      version: VERSION,
-      exportedAt: new Date().toISOString(),
+    const data = {
       units,
-      items,
+      materials,
       decks,
-      todos,
-      timetable,
-      issues,
-      notes,
-      mastery,
-      streak
+      cards,
+      exported: new Date().toISOString()
     };
-      $('#export-notes')?.addEventListener('click', () => {
-        const data = notes.slice().sort((a, b) => (b.updated || b.created) - (a.updated || a.created));
-        if (!data.length) return alert('No notes to export yet.');
-        const html = `<!doctype html><html><head><meta charset="utf-8"><title>JD Study Hub Notes Export</title></head><body>${
-          data.map((n) => {
-            const unit = units.find(u => u.id === n.unitId)?.name || 'Unit';
-            const updated = new Date(n.updated || n.created).toLocaleString();
-            return `<article style="margin-bottom:24px"><h2>${escapeHtml(n.title || 'Untitled')}</h2><div style="color:#666;font-size:12px">${escapeHtml(unit)} • ${escapeHtml(updated)}</div><div>${n.content || ''}</div></article>`;
-          }).join('')
-        }</body></html>`;
-        const blob = new Blob([html], { type: 'text/html' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `jd-study-hub-notes-${toISODate(new Date())}.html`;
-        a.click();
-        URL.revokeObjectURL(url);
-      });
-    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `jd-study-hub-export-${toISODate(new Date())}.json`;
+    a.download = `jd-exam-prep-${toISODate()}.json`;
     a.click();
-    URL.revokeObjectURL(url);
   });
 
-  $('#import-data')?.addEventListener('change', async (e) => {
-    const file = (e.target.files || [])[0];
-    if (!file) return;
-    try {
-      const raw = await file.text();
-      const data = JSON.parse(raw);
-      if (!data || !Array.isArray(data.units)) throw new Error('Invalid file format.');
-      if (!confirm('Import will replace your current local data. Continue?')) return;
-
-      units = data.units || [];
-      items = data.items || [];
-      decks = data.decks || [];
-      todos = data.todos || [];
-      timetable = data.timetable || [];
-      issues = data.issues || [];
-      notes = data.notes || [];
-      mastery = data.mastery || {};
-      streak = data.streak || { lastDayISO: null, count: 0 };
-
-      save(KEY.UNITS, units);
-      save(KEY.ITEMS, items);
-      save(KEY.DECKS, decks);
-      save(KEY.TODOS, todos);
-      save(KEY.TT, timetable);
-      save(KEY.ISSUES, issues);
-      save(KEY.NOTES, notes);
-      save(KEY.MASTERY, mastery);
-      save(KEY.STREAK, streak);
-      save(KEY.V, VERSION);
-
-      activeUnitId = units[0]?.id || null;
-      refreshAll();
-      alert('Import complete.');
-    } catch (err) {
-      alert('Import failed: ' + err.message);
-    } finally {
-      e.target.value = '';
-    }
-  });
-
-  $('#wipe-data')?.addEventListener('click', async () => {
-    if (!confirm('This wipes all local study data in this browser. Continue?')) return;
-    Object.values(KEY).forEach((k) => localStorage.removeItem(k));
-    localStorage.removeItem('sd_units');
-    localStorage.removeItem('sd_docs');
-    localStorage.removeItem('sd_lectures');
-    localStorage.removeItem('sd_decks');
-    localStorage.removeItem('sd_timetable');
-    localStorage.removeItem('sd_todos');
-    localStorage.removeItem('sd_issues');
-    try { await clearPdfStore(); } catch (_) {}
+  $('#wipe-data')?.addEventListener('click', () => {
+    if (!confirm('Delete all data? This cannot be undone.')) return;
+    Object.values(KEY).forEach(k => localStorage.removeItem(k));
     location.reload();
   });
 
-  // ----------------------------
-  // Refresh / init
-  // ----------------------------
-  function refreshAll() {
-    units = load(KEY.UNITS, units);
-    items = load(KEY.ITEMS, items);
-    decks = load(KEY.DECKS, decks);
-    timetable = load(KEY.TT, timetable);
-    todos = load(KEY.TODOS, todos);
-    issues = load(KEY.ISSUES, issues);
-    mastery = load(KEY.MASTERY, mastery);
-    streak = load(KEY.STREAK, streak);
-    selectedForTest = load(KEY.SELECTED_FOR_TEST, selectedForTest);
-    citations = load(KEY.CITATIONS, citations);
-    notes = load(KEY.NOTES, notes);
+  // ============================================
+  // INIT
+  // ============================================
 
-    ensureDefaultUnit();
-    ensureDefaultDeck();
-    renderUnitSelect();
-    renderUnitCards();
-
-    renderLibrary();
-    renderTags();
-
-    renderDeckSelect();
-    currentDeckId = $('#deck-select')?.value || unitDecks()[0]?.id || null;
-    loadDeck(currentDeckId);
-
-    renderDueList();
-    renderDeckStats();
-
-    populateYearSelector();
-    renderYearCalendar($('#tt-year-select')?.value || new Date().getFullYear());
-    renderTT();
-
-    renderTodos();
-    renderIssues();
-    renderPackList();
-
-    renderNoteFilters();
-    renderNotesList();
-
-    renderStats();
-    renderTestBuilderUI();
-  }
-
-  // Init
   ensureDefaultUnit();
   renderUnitSelect();
-  refreshAll();
-  go(load(KEY.LAST_VIEW, 'units'));
-window.addEventListener("load", async () => {
-  if (supabase) {
-    // Supabase will parse the URL hash (access_token) and store the session automatically.
-    // This call ensures the session is hydrated after returning from the email link.
-    await supabase.auth.getSession();
-  }
+  renderMaterials();
+  renderDeckSelect();
+  renderStats();
+  show('dashboard');
 
-  await go(load(KEY.LAST_VIEW, 'units'));
-});
+  // Restore theme
+  const savedTheme = localStorage.getItem('theme');
+  if (savedTheme) document.body.className = savedTheme;
 
-})(); // <- FINAL LINE
+})();
