@@ -27,8 +27,9 @@ body {
 body {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
   background: 
-    url('floral-pattern.jpg') repeat,
-    linear-gradient(135deg, rgba(255, 20, 147, 0.1), rgba(255, 182, 193, 0.05)),
+  import backgrounf from './floral-pattern.jpg'; <image src="floral-pattern.jpg" style="display:none;">
+    url('./floral-pattern.jpg') repeat,
+  linear-gradient(135deg, rgba(255, 20, 147, 0.1), rgba(255, 182, 193, 0.05)),
     var(--bg);
   background-size: 600px 600px, auto, auto;
   background-attachment: fixed;
@@ -44,7 +45,8 @@ body.theme-light {
   --border: rgba(2, 6, 23, 0.1);
   --shadow: 0 12px 28px rgba(2, 6, 23, 0.1);
   background: 
-    url('floral-pattern.jpg') repeat,
+  import backgrounf from './floral-pattern.jpg'; <image src="floral-pattern.jpg" style="display:none;">
+    url('./floral-pattern.jpg') repeat,
     linear-gradient(135deg, rgba(255, 20, 147, 0.05), rgba(255, 182, 193, 0.02)),
     var(--bg);
   background-size: 600px 600px, auto, auto;
