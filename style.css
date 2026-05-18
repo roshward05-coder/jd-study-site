@@ -26,8 +26,11 @@ body {
 
 body {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
-  background: linear-gradient(135deg, rgba(255, 20, 147, 0.1), rgba(255, 182, 193, 0.05)),
+  background: 
+    url('floral-pattern.jpg') repeat,
+    linear-gradient(135deg, rgba(255, 20, 147, 0.1), rgba(255, 182, 193, 0.05)),
     var(--bg);
+  background-size: 600px 600px, auto, auto;
   background-attachment: fixed;
   color: var(--text);
 }
@@ -40,8 +43,11 @@ body.theme-light {
   --muted: #4b5563;
   --border: rgba(2, 6, 23, 0.1);
   --shadow: 0 12px 28px rgba(2, 6, 23, 0.1);
-  background: linear-gradient(135deg, rgba(255, 20, 147, 0.05), rgba(255, 182, 193, 0.02)), 
+  background: 
+    url('floral-pattern.jpg') repeat,
+    linear-gradient(135deg, rgba(255, 20, 147, 0.05), rgba(255, 182, 193, 0.02)),
     var(--bg);
+  background-size: 600px 600px, auto, auto;
 }
 
 #app {
